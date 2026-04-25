@@ -1,0 +1,26 @@
+# env
+.env
+.env.*
+!.env.example
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+
+# node
+node_modules/
+dist/
+.vite/
+
+# data
+*.db
+*.sqlite
+*.sqlite3
+backend/storage/
+
+# os / editor
+.DS_Store
+.idea/
+.vscode/
