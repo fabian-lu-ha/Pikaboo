@@ -50,6 +50,7 @@ export function GeoPanel({ brand }: { brand: Brand }) {
   const [search, setSearch] = useState('')
   const load = useGeoStore((s) => s.load)
   const scan = useGeoStore((s) => s.scan)
+  const seed = useGeoStore((s) => s.seed)
   const loading = useGeoStore((s) => s.loading)
   const loadError = useGeoStore((s) => s.loadError)
   const scanStatus = useGeoStore((s) => s.scanStatus)
@@ -83,6 +84,7 @@ export function GeoPanel({ brand }: { brand: Brand }) {
           summary={summary}
           scanStatus={scanStatus}
           onScan={() => scan(brand.id)}
+          onSeed={() => seed(brand.id)}
         />
 
         {loadError && <ErrorState message={loadError} />}
@@ -130,6 +132,7 @@ function Header({
   summary,
   scanStatus,
   onScan,
+  onSeed,
 }: {
   brand: Brand
   loading: boolean
@@ -137,8 +140,30 @@ function Header({
   summary: ReturnType<typeof useGeoStore.getState>['summary']
   scanStatus: 'idle' | 'scanning' | 'done' | 'unavailable'
   onScan: () => void
+  onSeed: () => Promise<{
+    seeded: { id: string; text: string; source: string }[]
+    error: string | null
+  }>
 }) {
   const scanning = scanStatus === 'scanning'
+  const [seedState, setSeedState] = useState<
+    | { kind: 'idle' }
+    | { kind: 'seeding' }
+    | { kind: 'done'; count: number }
+    | { kind: 'error'; message: string }
+  >({ kind: 'idle' })
+
+  async function handleSeed() {
+    setSeedState({ kind: 'seeding' })
+    const { seeded, error } = await onSeed()
+    if (error) {
+      setSeedState({ kind: 'error', message: error })
+    } else {
+      setSeedState({ kind: 'done', count: seeded.length })
+      window.setTimeout(() => setSeedState({ kind: 'idle' }), 4000)
+    }
+  }
+
   return (
     <motion.section
       initial={{ opacity: 0, y: 8 }}
@@ -176,6 +201,26 @@ function Header({
             <span>Run a campaign or click scan to populate</span>
           )}
         </div>
+        <button
+          onClick={handleSeed}
+          disabled={seedState.kind === 'seeding'}
+          title="Add brand-relevant prompts to the Peec project"
+          className="hairline inline-flex items-center gap-2 rounded-xl bg-bg-card px-4 py-2 text-[12.5px] font-medium text-fg-mute hover:text-fg disabled:opacity-60"
+        >
+          {seedState.kind === 'seeding' && (
+            <>
+              <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-fg/30 border-t-fg/80" />
+              Seeding…
+            </>
+          )}
+          {seedState.kind === 'done' && (
+            <>✓ Seeded {seedState.count} prompts</>
+          )}
+          {seedState.kind === 'error' && (
+            <span className="text-red-700">Seed failed</span>
+          )}
+          {seedState.kind === 'idle' && <>＋ Seed prompts</>}
+        </button>
         <button
           onClick={onScan}
           disabled={scanning}

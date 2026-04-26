@@ -121,6 +121,11 @@ class AISynthesis(BaseModel):
 
 class DataSources(BaseModel):
     peec: Literal["connected", "no_data", "not_configured"]
+    # Which transport actually answered the snapshot. mcp = OAuth-backed
+    # MCP session (the contest-credible path); rest = x-api-key REST
+    # fallback; none = no source available. Surfaced in the dashboard's
+    # data-sources strip so the user can verify MCP is live.
+    peec_transport: Literal["mcp", "rest", "none"]
     customers_count: int
     campaigns_count: int
     email_sends_count: int
@@ -798,6 +803,15 @@ async def _build_overview(
     else:
         peec_status = "connected"
 
+    # Resolve the transport that actually answered. fetch_snapshot stamps
+    # ``raw_summary['via']`` as 'mcp' or 'rest'; surface it so the
+    # dashboard can render "Peec MCP live" instead of generic "Peec live".
+    if snap is None:
+        peec_transport: Literal["mcp", "rest", "none"] = "none"
+    else:
+        via = (snap.raw_summary or {}).get("via")
+        peec_transport = "mcp" if via == "mcp" else "rest" if via == "rest" else "none"
+
     overview = AnalyticsOverview(
         brand_id=brand.id,
         brand_name=brand.name,
@@ -815,6 +829,7 @@ async def _build_overview(
         ai_synthesis=None,
         data_sources=DataSources(
             peec=peec_status,
+            peec_transport=peec_transport,
             customers_count=customers_count,
             campaigns_count=campaigns_count,
             email_sends_count=email_sends_count,

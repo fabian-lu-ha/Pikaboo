@@ -34,6 +34,7 @@ from app.services import audience as _audience_listeners  # noqa: F401  -- regis
 from app.services.agent import loop as agent_loop  # noqa: F401  -- registers chat.submitted listener
 from app.services.agent.checkpoints import start_listener as start_run_checkpoints
 from app.services.assets import start_listener as start_assets_listener
+from app.services.peec.auto_seed import register_listener as register_peec_auto_seed
 from app.services.enrichment import browser as pw_browser
 from app.services.finetune import orchestrator as finetune_orchestrator
 from app.services.pipeline import triggers as pipeline_triggers
@@ -45,6 +46,7 @@ async def lifespan(_: FastAPI):
     Base.metadata.create_all(bind=engine)
     start_assets_listener()
     start_run_checkpoints()
+    register_peec_auto_seed()
     # Voice fine-tune jobs run as in-process asyncio tasks. Any task in
     # flight when the previous process died is gone — clear its DB
     # status so the UI doesn't show a forever-running job. Critical

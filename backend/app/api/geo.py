@@ -37,6 +37,8 @@ from app.services.geo import (
 )
 from app.services.geo.asset_generator import publish_asset
 from app.services.geo.playbook import ACTION_TYPES
+from app.services.peec.auto_seed import auto_seed_for_brand
+from app.services.peec.seed_prompts import PeecSeedError
 
 log = logging.getLogger(__name__)
 
@@ -125,6 +127,23 @@ class ScanIn(BaseModel):
 
 class PublishIn(BaseModel):
     publish_url: str | None = None
+
+
+class SeedPromptsIn(BaseModel):
+    brand_id: str | None = None
+    target_count: int = 12
+
+
+class SeededPromptOut(BaseModel):
+    id: str
+    text: str
+    source: str
+
+
+class SeedPromptsOut(BaseModel):
+    brand_id: str
+    seeded: list[SeededPromptOut]
+    seeded_count: int
 
 
 # ------------------------------------------------------------------ endpoints
@@ -248,6 +267,32 @@ def reject_recommendation(
     db.commit()
     bus.emit(Events.GEO_ACTION_REJECTED, payload)
     return {"ok": True, "recommendation_id": recommendation_id}
+
+
+@router.post("/seed-prompts", response_model=SeedPromptsOut)
+async def seed_prompts_endpoint(
+    body: SeedPromptsIn, db: Annotated[Session, Depends(get_db)]
+) -> SeedPromptsOut:
+    """Seed the configured Peec project with brand-relevant prompts.
+
+    Two-stage: accepts existing AI suggestions first, then tops up with
+    Gemini-generated category prompts grounded in the brand's name +
+    description + competitor list. Idempotent — if the project already
+    has ≥ target_count prompts, returns an empty list."""
+    brand_id = _resolve_brand_id(db, body.brand_id)
+    if brand_id is None:
+        raise HTTPException(status_code=404, detail="brand not found")
+    try:
+        seeded = await auto_seed_for_brand(brand_id, target_count=body.target_count)
+    except PeecSeedError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return SeedPromptsOut(
+        brand_id=brand_id,
+        seeded=[
+            SeededPromptOut(id=s.id, text=s.text, source=s.source) for s in seeded
+        ],
+        seeded_count=len(seeded),
+    )
 
 
 @router.get("/assets/{asset_id}", response_model=AssetOut)

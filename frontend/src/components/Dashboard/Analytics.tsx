@@ -54,6 +54,7 @@ type AISynthesis = {
 
 type DataSources = {
   peec: 'connected' | 'no_data' | 'not_configured'
+  peec_transport: 'mcp' | 'rest' | 'none'
   customers_count: number
   campaigns_count: number
   email_sends_count: number
@@ -429,7 +430,15 @@ function DataSourcesBar({
 }) {
   const peecLabel =
     sources.peec === 'connected'
-      ? { text: 'Peec live', dot: 'bg-emerald-500' }
+      ? {
+          text:
+            sources.peec_transport === 'mcp'
+              ? 'Peec MCP live'
+              : sources.peec_transport === 'rest'
+                ? 'Peec REST live'
+                : 'Peec live',
+          dot: 'bg-emerald-500',
+        }
       : sources.peec === 'no_data'
         ? { text: 'Peec connected · no data', dot: 'bg-amber-500' }
         : { text: 'Peec not connected', dot: 'bg-zinc-400' }

@@ -105,29 +105,26 @@ class PeecClient:
         end_date: str | None = None,
         dimensions: list[str] | None = None,
         filters: dict | None = None,
+        limit: int = 1000,
     ) -> dict:
-        params: dict[str, Any] = {}
-        if project_id:
-            params["project_id"] = project_id
-        if start_date:
-            params["start_date"] = start_date
-        if end_date:
-            params["end_date"] = end_date
-        if dimensions:
-            params["dimensions"] = ",".join(dimensions)
-        if filters:
-            for k, v in filters.items():
-                params[f"filter[{k}]"] = v
-        return await self._get("/reports/brands", params or None)
+        body = _build_report_body(
+            project_id=project_id,
+            start_date=start_date,
+            end_date=end_date,
+            dimensions=dimensions,
+            filters=filters,
+            limit=limit,
+        )
+        return await self._post("/reports/brands", body)
 
     async def get_domains_report(self, **kwargs: Any) -> dict:
-        return await self._get(
-            "/reports/domains", _clean_params(kwargs) or None
+        return await self._post(
+            "/reports/domains", _build_report_body(**kwargs)
         )
 
     async def get_urls_report(self, **kwargs: Any) -> dict:
-        return await self._get(
-            "/reports/urls", _clean_params(kwargs) or None
+        return await self._post(
+            "/reports/urls", _build_report_body(**kwargs)
         )
 
 
@@ -141,6 +138,46 @@ def _clean_params(d: dict[str, Any]) -> dict[str, Any]:
         else:
             out[k] = v
     return out
+
+
+def _build_report_body(
+    project_id: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    dimensions: list[str] | None = None,
+    filters: dict | list | None = None,
+    limit: int = 1000,
+    offset: int = 0,
+    order_by: list | None = None,
+) -> dict[str, Any]:
+    """Assemble a /reports/* POST body the way the live Peec API expects it.
+
+    Defaults to a 90-day window ending today — without dates Peec would
+    use 2026-01-01 → 2026-01-01 (a single day) and almost always return
+    zero rows. project_id is optional when the API key is project-scoped
+    (skp-... keys); it's only required for company-scoped keys.
+    """
+    from datetime import date, timedelta
+
+    today = date.today()
+    body: dict[str, Any] = {
+        "limit": limit,
+        "offset": offset,
+        "start_date": start_date or (today - timedelta(days=90)).isoformat(),
+        "end_date": end_date or today.isoformat(),
+    }
+    if project_id:
+        body["project_id"] = project_id
+    if dimensions:
+        body["dimensions"] = list(dimensions)
+    if filters:
+        body["filters"] = filters if isinstance(filters, list) else [
+            {"field": k, "operator": "eq", "values": v if isinstance(v, list) else [v]}
+            for k, v in filters.items()
+        ]
+    if order_by:
+        body["order_by"] = order_by
+    return body
 
 
 _client: PeecClient | None = None

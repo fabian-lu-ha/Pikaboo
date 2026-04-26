@@ -144,6 +144,27 @@ def _to_int(v) -> int | None:
         return None
 
 
+def _row_brand_name(row: dict) -> str:
+    """The /reports/brands payload nests brand as ``{"brand": {"id", "name"}}``;
+    older shapes had a flat string. Normalize both."""
+    b = row.get("brand")
+    if isinstance(b, dict):
+        return str(b.get("name") or "")
+    if isinstance(b, str):
+        return b
+    return str(_f(row, "brand_name", "name", default="") or "")
+
+
+def _percent(v) -> float | None:
+    """Normalize visibility / SoV onto 0-100. Peec's REST API returns
+    values in [0, 1]; older mock data passed already-percent values.
+    Anything <= 1 is assumed to be a fraction and scaled up."""
+    f = _to_float(v)
+    if f is None:
+        return None
+    return f * 100.0 if f <= 1.0 else f
+
+
 async def fetch_snapshot(brand: dict) -> PeecSnapshot | None:
     """Pull a full visibility snapshot for the given brand.
 
@@ -190,19 +211,20 @@ async def fetch_snapshot(brand: dict) -> PeecSnapshot | None:
     for row in rows:
         if not isinstance(row, dict):
             continue
-        row_brand = (
-            _f(row, "brand", "brand_name", "name", default="") or ""
-        ).lower()
+        # Live Peec returns brand as an object {id, name}; older / mock
+        # responses had it as a string. Handle both.
+        row_brand_name = _row_brand_name(row)
+        row_brand = row_brand_name.lower()
         if row_brand and brand_name_lc and row_brand == brand_name_lc:
             own_summary = row
         elif row_brand:
             competitors.append(
                 {
-                    "name": _f(row, "brand", "brand_name", "name") or "",
-                    "visibility": _to_float(
+                    "name": row_brand_name,
+                    "visibility": _percent(
                         _f(row, "visibility", "visibility_score", "share")
                     ),
-                    "share_of_voice": _to_float(
+                    "share_of_voice": _percent(
                         _f(row, "share_of_voice", "sov")
                     ),
                     "sentiment": _to_float(
@@ -211,10 +233,10 @@ async def fetch_snapshot(brand: dict) -> PeecSnapshot | None:
                 }
             )
 
-    own_visibility = _to_float(
+    own_visibility = _percent(
         _f(own_summary, "visibility", "visibility_score", "share")
     )
-    sov = _to_float(_f(own_summary, "share_of_voice", "sov"))
+    sov = _percent(_f(own_summary, "share_of_voice", "sov"))
     sentiment = _to_float(_f(own_summary, "sentiment", "sentiment_score"))
 
     for p in prompts[:25]:

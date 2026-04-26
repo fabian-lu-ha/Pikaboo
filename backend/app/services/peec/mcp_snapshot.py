@@ -37,6 +37,8 @@ from app.services.peec.snapshot import (
     PromptDetail,
     VisiblePrompt,
     _f,
+    _percent,
+    _row_brand_name,
     _to_float,
     _to_int,
 )
@@ -66,13 +68,26 @@ def _as_list(payload: Any) -> list[dict]:
     if isinstance(payload, list):
         return [x for x in payload if isinstance(x, dict)]
     if isinstance(payload, dict):
+        # Peec MCP returns column-oriented tables: {columns, rows, rowCount}
+        # where each ``row`` is a list of values aligned to ``columns``.
+        # Adapt to a list of dicts so the rest of the pipeline doesn't
+        # care which transport produced the data.
+        cols = payload.get("columns")
+        rows = payload.get("rows")
+        if isinstance(cols, list) and isinstance(rows, list):
+            out: list[dict] = []
+            for row in rows:
+                if isinstance(row, list) and len(row) == len(cols):
+                    out.append(dict(zip(cols, row)))
+                elif isinstance(row, dict):
+                    out.append(row)
+            return out
         for key in (
             "data",
             "items",
             "prompts",
             "brands",
             "results",
-            "rows",
             "history",
             "engines",
             "sources",
@@ -116,11 +131,25 @@ def _canon_engine(label: str | None) -> str:
 
 async def fetch_snapshot_via_mcp(brand: dict) -> PeecSnapshot | None:
     """Same return shape as ``snapshot.fetch_snapshot`` but via MCP. Returns
-    None when MCP isn't connected; otherwise returns a snapshot with whichever
-    fields the discovered tools could populate."""
+    None when MCP isn't connected, when ``project_id`` is missing (Peec's
+    MCP tools all require it), or on session failure; otherwise returns a
+    snapshot populated by whichever discovered tools succeeded."""
     project_id = settings.peec_project_id
     brand_name = brand.get("name") or ""
     brand_name_lc = brand_name.lower()
+
+    if not project_id:
+        log.warning(
+            "peec_mcp: PEEC_PROJECT_ID not set — every MCP tool requires it; "
+            "skipping MCP path so caller can fall through to REST",
+        )
+        return None
+
+    # 90-day window ending today — Peec's report tools default rejects
+    # both date fields, so we always supply them.
+    from datetime import date, timedelta
+    end_date = date.today().isoformat()
+    start_date = (date.today() - timedelta(days=90)).isoformat()
 
     # Probe for tokens; bail early if not connected.
     try:
@@ -135,6 +164,9 @@ async def fetch_snapshot_via_mcp(brand: dict) -> PeecSnapshot | None:
                 for t in tool_list_result.tools
             ]
 
+            # Peec's MCP names: list_prompts, get_brand_report (singular!),
+            # get_domain_report, list_models, etc. The substring match on
+            # 'brand' + 'report' picks get_brand_report cleanly.
             list_prompts_name = _pick(tools, "prompt", "list") or _pick(
                 tools, "prompt"
             )
@@ -144,20 +176,19 @@ async def fetch_snapshot_via_mcp(brand: dict) -> PeecSnapshot | None:
             history_name = _pick_any(
                 tools, "history", "trend", "timeseries", "timeline"
             )
-            engines_name = _pick_any(
+            engines_name = _pick(tools, "model", "list") or _pick_any(
                 tools, "engine", "source", "model", "platform"
             )
-            citations_name = _pick_any(
+            citations_name = _pick(tools, "domain", "report") or _pick_any(
                 tools, "citation", "domain", "cited"
             )
 
-            common: dict[str, Any] = {}
-            if project_id:
-                common["project_id"] = project_id
-            brand_arg: dict[str, Any] = dict(common)
-            if brand_name:
-                brand_arg["brand"] = brand_name
-                brand_arg["brand_name"] = brand_name
+            base: dict[str, Any] = {"project_id": project_id}
+            with_dates: dict[str, Any] = {
+                **base,
+                "start_date": start_date,
+                "end_date": end_date,
+            }
 
             prompts: list[dict] = []
             report: Any = {}
@@ -171,25 +202,30 @@ async def fetch_snapshot_via_mcp(brand: dict) -> PeecSnapshot | None:
                 try:
                     r = await session.call_tool(name, args)
                     if r.isError:
+                        log.warning(
+                            "peec_mcp.%s tool error: %s",
+                            name,
+                            [c.model_dump() for c in r.content][:1],
+                        )
                         return None
                     return _unwrap(r.content)
                 except Exception as e:  # noqa: BLE001
                     log.warning("peec_mcp.%s failed: %s", name, e)
                     return None
 
-            prompts_payload = await _safe_call(list_prompts_name, common)
+            prompts_payload = await _safe_call(list_prompts_name, base)
             if prompts_payload is not None:
                 prompts = _as_list(prompts_payload)
 
-            report = await _safe_call(brands_report_name, common) or {}
+            report = await _safe_call(brands_report_name, with_dates) or {}
             history_payload = (
-                await _safe_call(history_name, brand_arg) or {}
+                await _safe_call(history_name, with_dates) or {}
             )
             engines_payload = (
-                await _safe_call(engines_name, brand_arg) or {}
+                await _safe_call(engines_name, base) or {}
             )
             citations_payload = (
-                await _safe_call(citations_name, brand_arg) or {}
+                await _safe_call(citations_name, with_dates) or {}
             )
     except PeecMCPNotConnectedError:
         return None
@@ -206,19 +242,18 @@ async def fetch_snapshot_via_mcp(brand: dict) -> PeecSnapshot | None:
     own_summary: dict = {}
     competitors: list[dict] = []
     for row in rows:
-        row_brand = (
-            _f(row, "brand", "brand_name", "name", default="") or ""
-        ).lower()
+        row_brand_name = _row_brand_name(row)
+        row_brand = row_brand_name.lower()
         if row_brand and brand_name_lc and row_brand == brand_name_lc:
             own_summary = row
         elif row_brand:
             competitors.append(
                 {
-                    "name": _f(row, "brand", "brand_name", "name") or "",
-                    "visibility": _to_float(
+                    "name": row_brand_name,
+                    "visibility": _percent(
                         _f(row, "visibility", "visibility_score", "share")
                     ),
-                    "share_of_voice": _to_float(
+                    "share_of_voice": _percent(
                         _f(row, "share_of_voice", "sov")
                     ),
                     "sentiment": _to_float(
@@ -227,10 +262,10 @@ async def fetch_snapshot_via_mcp(brand: dict) -> PeecSnapshot | None:
                 }
             )
 
-    own_visibility = _to_float(
+    own_visibility = _percent(
         _f(own_summary, "visibility", "visibility_score", "share")
     )
-    sov = _to_float(_f(own_summary, "share_of_voice", "sov"))
+    sov = _percent(_f(own_summary, "share_of_voice", "sov"))
     sentiment = _to_float(_f(own_summary, "sentiment", "sentiment_score"))
 
     # ------------------------- prompts → visible/absent ------------------
@@ -298,47 +333,53 @@ async def fetch_snapshot_via_mcp(brand: dict) -> PeecSnapshot | None:
             )
 
     # ----------------------------- citations -----------------------------
+    # Peec's get_domain_report returns columns:
+    #   domain, classification, retrieved_percentage, retrieval_rate,
+    #   citation_rate, retrieval_count, citation_count, mentioned_brand_ids
     cited_domains: list[CitedDomain] = []
-    domains_payload = (
-        _f(own_summary, "cited_domains", "top_domains", default=None)
-        or citations_payload
-    )
-    domain_rows: list = []
-    if isinstance(domains_payload, list):
-        domain_rows = domains_payload
-    elif isinstance(domains_payload, dict):
-        domain_rows = _as_list(domains_payload)
+    domain_rows = _as_list(citations_payload)
+    if not domain_rows:
+        # Fallback to whatever the brands_report row exposed (REST shape).
+        legacy = _f(own_summary, "cited_domains", "top_domains", default=None)
+        if isinstance(legacy, list):
+            domain_rows = [
+                d if isinstance(d, dict) else {"domain": d} for d in legacy
+            ]
     for i, d in enumerate(domain_rows[:15]):
-        if isinstance(d, dict):
-            domain = (
-                _f(d, "domain", "host", "url", "site", "name") or ""
-            ).strip()
-            if not domain:
-                continue
-            cited_domains.append(
-                CitedDomain(
-                    domain=domain,
-                    citation_count=_to_int(
-                        _f(d, "citations", "count", "n", "mentions")
-                    ),
-                    rank=_to_int(_f(d, "rank", "position")) or (i + 1),
-                    favicon_url=_f(d, "favicon", "favicon_url", "icon"),
-                )
+        if not isinstance(d, dict):
+            continue
+        domain = (
+            _f(d, "domain", "host", "url", "site", "name") or ""
+        ).strip()
+        if not domain:
+            continue
+        cited_domains.append(
+            CitedDomain(
+                domain=domain,
+                citation_count=_to_int(
+                    _f(d, "citation_count", "citations", "count", "n", "mentions")
+                ),
+                rank=_to_int(_f(d, "rank", "position")) or (i + 1),
+                favicon_url=_f(d, "favicon", "favicon_url", "icon"),
             )
-        elif isinstance(d, str):
-            cited_domains.append(CitedDomain(domain=d, rank=i + 1))
+        )
 
     # ----------------------------- engines -------------------------------
+    # Peec's list_models returns columns: id, name, is_active. There's no
+    # per-engine visibility number on this endpoint, so we derive a
+    # presence list and let the dashboard mark active vs. inactive.
     engines: list[EnginePoint] = []
     seen_engines: set[str] = set()
     engine_rows = _as_list(engines_payload)
     for r in engine_rows:
         label = (
-            _f(r, "engine", "name", "label", "platform", "source")
+            _f(r, "name", "engine", "label", "platform", "source")
             or ""
         ).strip()
         if not label:
             continue
+        if r.get("is_active") is False:
+            continue  # skip the engines this Peec project isn't tracking
         canon = _canon_engine(label)
         if canon in seen_engines:
             continue
@@ -347,10 +388,10 @@ async def fetch_snapshot_via_mcp(brand: dict) -> PeecSnapshot | None:
             EnginePoint(
                 engine=canon,
                 label=label,
-                visibility=_to_float(
+                visibility=_percent(
                     _f(r, "visibility", "visibility_score", "share")
                 ),
-                share_of_voice=_to_float(
+                share_of_voice=_percent(
                     _f(r, "share_of_voice", "sov")
                 ),
                 rank=_to_int(_f(r, "rank", "position")),

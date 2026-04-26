@@ -99,7 +99,24 @@ class _ClientInfo:
 
 
 def _store_dir() -> Path:
-    p = Path(settings.storage_dir) / "peec_mcp"
+    """Anchor the OAuth token cache to an absolute path so it doesn't
+    drift between cwds.
+
+    ``settings.storage_dir`` defaults to ``./storage`` — that resolves
+    relative to wherever uvicorn was launched. Running ``uvicorn
+    app.main:app`` from ``backend/`` writes to ``backend/storage``;
+    running ``uvicorn backend.app.main:app`` from the repo root writes
+    to ``./storage``. The OAuth callback would land tokens in one and
+    the snapshot fetcher would look in the other. Anchoring to the
+    backend directory makes the path stable regardless of cwd.
+    """
+    raw = Path(settings.storage_dir)
+    if not raw.is_absolute():
+        # __file__ → backend/app/services/peec/mcp_auth.py
+        # parents[3] → backend/
+        backend_root = Path(__file__).resolve().parents[3]
+        raw = backend_root / raw
+    p = raw / "peec_mcp"
     p.mkdir(parents=True, exist_ok=True)
     return p
 

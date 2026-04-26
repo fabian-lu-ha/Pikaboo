@@ -63,9 +63,19 @@ type State = {
   summary: GeoSummary
 }
 
+export type SeededPrompt = {
+  id: string
+  text: string
+  source: 'suggestion' | 'generated' | string
+}
+
 type Actions = {
   load: (brandId: string) => Promise<void>
   scan: (brandId: string, topK?: number) => Promise<void>
+  seed: (
+    brandId: string,
+    targetCount?: number,
+  ) => Promise<{ seeded: SeededPrompt[]; error: string | null }>
   accept: (recommendationId: string) => Promise<void>
   reject: (recommendationId: string) => Promise<void>
   publish: (assetId: string, publishUrl?: string) => Promise<void>
@@ -167,6 +177,36 @@ export const useGeoStore = create<State & Actions>((set) => ({
         loading: false,
         loadError: e instanceof Error ? e.message : 'load failed',
       })
+    }
+  },
+
+  seed: async (brandId: string, targetCount = 12) => {
+    try {
+      const r = await fetch('/api/geo/seed-prompts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ brand_id: brandId, target_count: targetCount }),
+      })
+      if (!r.ok) {
+        const detail = await r
+          .json()
+          .then((j) => j?.detail ?? null)
+          .catch(() => null)
+        return {
+          seeded: [],
+          error: detail ?? `Seed failed (${r.status})`,
+        }
+      }
+      const data = (await r.json()) as {
+        seeded: SeededPrompt[]
+        seeded_count: number
+      }
+      return { seeded: data.seeded ?? [], error: null }
+    } catch (e) {
+      return {
+        seeded: [],
+        error: e instanceof Error ? e.message : 'Seed failed',
+      }
     }
   },
 

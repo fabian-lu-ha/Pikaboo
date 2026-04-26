@@ -24,8 +24,8 @@ FastAPI app with an event-bus core. Every feature listens on or emits events —
 | Onboarding | `app/api/onboarding.py`, `app/services/onboarding/` | Site scrape (Playwright + Trafilatura) → brand extraction → palette + logo + voice profile. |
 | Agent loop | `app/services/agent/` | Chat-driven planner. Pulls Peec snapshots, drafts content in brand voice, predicts lift, streams progress over SSE. |
 | Audience | `app/services/audience/` | CRM connect (HubSpot Private App), segmentation, offer/policy validation, shop-event triggers, 1:1 personalization, HTML email rendering. |
-| Peec integration | `app/services/peec/` | Both the REST client and the MCP client (HTTP + auth) used for the Peec MCP Challenge. |
-| GEO | `app/services/geo/` | Gap detection on visibility data, channel playbook scoring. |
+| Peec integration | `app/services/peec/` | Both the REST client (`x-api-key`, POST `/reports/*`) and the MCP client (OAuth 2.1 + DCR + PKCE). `fetch_snapshot` tries MCP first, falls back to REST silently — both populate the same `PeecSnapshot` shape. Includes `seed_prompts.py` (accepts Peec's AI suggestions, then tops up with Gemini-generated category prompts) and `auto_seed.py` (listens on `ONBOARDING_COMPLETED` so every new brand auto-seeds without a manual click). |
+| GEO Workbench | `app/services/geo/` | Closes the loop on Peec. `gap_detector` ranks absent prompts by competitor visibility × visibility gap. `recommender` runs a Gemini call biased by per-engine playbook (ChatGPT / Perplexity / Gemini / Claude / AI Overviews) and picks one of six action types. `asset_generator` dispatches to per-action generators: comparison page, definition-first rewrite, FAQ + JSON-LD schema, stats+quote injection, Wikidata/Organization sameAs, Reddit answer draft (always human-in-loop). All lifecycle events stream over SSE so the GeoPanel fills live. |
 | Video gen | `app/services/video_gen/`, `frontend/remotion/` | Storyboard → cast/scene/frame generation → critic + improver loop → Remotion render via subprocess. |
 | Pioneer fine-tune | `app/services/finetune/` | Per-brand Gemma voice training on Pioneer / Fastino Labs (with 90s simulator fallback when no key). |
 | Asset library | `app/services/assets/`, `app/services/asset_describe/`, `app/services/image_edit/` | Generated + uploaded assets, captions, edits via Nano Banana Pro. |
@@ -122,8 +122,9 @@ Set in `backend/.env` (see [`.env.example`](./.env.example)) unless noted.
 
 | Key | What it unlocks | Without it |
 | :-- | :-------------- | :--------- |
-| `PEEC_API_KEY` | Live AI-search visibility snapshots, competitor radar, GEO gap detection grounded in real data. | GEO panel + competitor radar fall back to deterministic fixture data so the demo flow still runs. |
-| `PEEC_PROJECT_ID` | Pin Peec calls to one project (otherwise the first project on the key is used). | Auto-selects first project. |
+| `PEEC_API_KEY` | Live AI-search visibility snapshots, competitor radar, GEO gap detection grounded in real data. The REST path (`x-api-key`, `skp-…` keys are project-scoped; `cmp-…` keys are company-scoped). | GEO panel + competitor radar fall back to deterministic fixture data so the demo flow still runs. |
+| `PEEC_PROJECT_ID` | Required for **Peec MCP** (every MCP tool requires `project_id` as a string). Optional for REST when using a project-scoped `skp-…` key (the project is encoded in the key itself); required for company-scoped `cmp-…` keys. | MCP path is skipped, REST falls through silently. |
+| **Peec MCP** (no env var) | Contest-credible OAuth 2.1 transport. Click **Connect Peec MCP →** in the GeoPanel header (or the Market Position card on Analytics). Backend runs Dynamic Client Registration on first use, persists tokens to `backend/storage/peec_mcp/tokens.json`, refreshes automatically. Once connected, `Analytics` shows **`● Peec MCP live`** instead of `Peec REST live`. | REST is the silent fallback. |
 | `TAVILY_API_KEY` | Web search + extraction for the research leg (onboarding research, agent loop grounding). | `gather_brand_context` is a no-op; agent drafts skip web grounding. |
 | `PIONEER_API_KEY` | Real per-brand Gemma/Qwen voice fine-tune via Pioneer / Fastino Labs. | 90-second in-process simulator emits identical events so the demo flow still works. |
 | `HUBSPOT_*` (per-brand, not env) | Real CRM contacts, products, deals for audience segmentation + 1:1 campaigns. Token entered in the **Connect CRM** modal on the audience page. | Deterministic sample-data CRM provider (~50 fake contacts across 4 segments). |
@@ -256,11 +257,56 @@ cd frontend/remotion && bunx tsc --noEmit
 
 ---
 
+## GEO Workbench (the closed loop)
+
+Brand Autopilot's contest-credible **GEO Optimization** surface lives at `Dashboard → GEO`. It closes the loop from Peec's measurement layer to actual published assets:
+
+```
+Peec snapshot       → gap_detector       → GeoGap rows           (per absent prompt)
+                      ↓
+                      recommender (Gemini, biased by per-engine playbook)
+                      ↓
+                      GeoRecommendation rows                      (one action_type per gap)
+                      ↓ user clicks Accept
+                      asset_generator
+                      ↓ dispatch by action_type
+   ┌────────────────────────────────────────────────────────────────────────┐
+   │ comparison_page    "Brand vs X" page (32.5% of all AI citations)       │
+   │ definition_first   page lede rewrite (44.2% of citations come from     │
+   │                    the first 30% of the page; ConvertMate 2026)        │
+   │ faq_schema         FAQ block + FAQPage JSON-LD (+78% citation odds)    │
+   │ stats_quote        Princeton GEO paper combo: stat + quote + outbound  │
+   │                    citation (+30-40% lift)                             │
+   │ wikidata_schema    Organization sameAs to Wikidata + Q-item update     │
+   │ reddit_draft       human-approved answer draft (never auto-posts)      │
+   └────────────────────────────────────────────────────────────────────────┘
+                      ↓
+                      GeoAsset rows                               (markdown + JSON-LD)
+                      ↓ user clicks Mark published
+                      GEO_ASSET_PUBLISHED event
+```
+
+Endpoints:
+
+```bash
+GET  /api/geo/overview?brand_id=X             # full panel state
+POST /api/geo/scan                            # force re-detection
+POST /api/geo/seed-prompts                    # idempotent seed (auto-runs on onboarding)
+POST /api/geo/recommendations/{id}/accept     # generates the asset
+POST /api/geo/recommendations/{id}/reject
+GET  /api/geo/assets/{id}
+POST /api/geo/assets/{id}/publish
+```
+
+The loop also auto-fans-out from the agent loop: every `CAMPAIGN_BUNDLED` event triggers `detect_gaps_for_brand` + `recommend_for_gap` per top-K gap, so the GeoPanel populates without the user ever clicking Scan.
+
+---
+
 ## Hackathon submission
 
 Same repo qualifies for both contests:
 
 - **Big Berlin Hack** — full agent demo
-- **Peec MCP Challenge** — `app/services/peec/mcp_*` is the dedicated MCP integration
+- **Peec MCP Challenge** — `app/services/peec/mcp_*` (OAuth 2.1, DCR, PKCE, tabular-payload adapter) + the GEO Workbench it powers
 
 Aikido is wired as a security hygiene tool (not counted toward the 3 partner technologies); Pioneer fine-tuning layers on top.
