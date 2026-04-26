@@ -2,11 +2,18 @@ import { AnimatePresence, motion } from 'motion/react'
 import { useAudienceStore } from '../../stores/audienceStore'
 import { InitialsAvatar } from '../InitialsAvatar'
 import { PersonalizeBlock } from './PersonalizeBlock'
+import { CampaignStoryboard } from './CampaignStoryboard'
+import { SegmentPolicyOverride } from './SegmentPolicyOverride'
 import type { Customer } from '../../lib/audience'
 
 type Props = {
   brandId: string
 }
+
+// Stable empty-array reference so the Zustand selector below never returns a
+// fresh `[]` literal on every call — that would trigger an infinite render
+// loop via useSyncExternalStore (snapshot would look "changed" each time).
+const EMPTY_MEMBERS: Customer[] = []
 
 export function SegmentDrawer({ brandId }: Props) {
   const drawerKind = useAudienceStore((s) => s.drawerKind)
@@ -15,9 +22,10 @@ export function SegmentDrawer({ brandId }: Props) {
   const segment = useAudienceStore((s) =>
     segmentId ? s.segments.find((sg) => sg.id === segmentId) ?? null : null,
   )
-  const members = useAudienceStore((s) =>
-    segmentId ? s.segmentMembers[segmentId] ?? [] : [],
+  const memberRow = useAudienceStore((s) =>
+    segmentId ? s.segmentMembers[segmentId] : undefined,
   )
+  const members = memberRow ?? EMPTY_MEMBERS
   const openCustomerDrawer = useAudienceStore((s) => s.openCustomerDrawer)
 
   const open = drawerKind === 'segment' && !!segmentId
@@ -79,7 +87,7 @@ export function SegmentDrawer({ brandId }: Props) {
               </div>
             </header>
 
-            <div className="flex-1 overflow-y-auto px-6 pb-8 [scrollbar-width:thin]">
+            <div className="flex-1 overflow-y-auto overscroll-contain px-6 pb-8 [scrollbar-width:thin]">
               <Members
                 members={members}
                 onSelect={openCustomerDrawer}
@@ -94,6 +102,25 @@ export function SegmentDrawer({ brandId }: Props) {
                       ? 'recipient'
                       : 'recipients'
                   }`}
+                />
+              </div>
+              <div className="mt-8">
+                <CampaignStoryboard
+                  brandId={brandId}
+                  targetKind="segment"
+                  targetId={segment.id}
+                  recipientLabel={`${segment.customer_ids.length} ${
+                    segment.customer_ids.length === 1
+                      ? 'recipient'
+                      : 'recipients'
+                  }`}
+                  showMergeTags
+                />
+              </div>
+              <div className="mt-8">
+                <SegmentPolicyOverride
+                  brandId={brandId}
+                  segmentId={segment.id}
                 />
               </div>
             </div>

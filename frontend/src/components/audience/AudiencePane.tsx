@@ -10,6 +10,8 @@ import { ProposedSegmentsModal } from './ProposedSegmentsModal'
 import { ProductGrid } from './ProductGrid'
 import { AudienceActivityFeed } from './AudienceActivityFeed'
 import { ShopFeed } from './ShopFeed'
+import { OfferPolicyPanel } from './OfferPolicyPanel'
+import { TriggersPanel } from './TriggersPanel'
 
 type Tab = 'customers' | 'segments' | 'products'
 
@@ -20,6 +22,8 @@ type Props = {
 
 export function AudiencePane({ brandId, brandName }: Props) {
   const [tab, setTab] = useState<Tab>('customers')
+  const [policyOpen, setPolicyOpen] = useState(false)
+  const [triggersOpen, setTriggersOpen] = useState(false)
 
   const customers = useAudienceStore((s) => s.customers)
   const products = useAudienceStore((s) => s.products)
@@ -84,6 +88,18 @@ export function AudiencePane({ brandId, brandName }: Props) {
             </button>
           ) : null}
           <button
+            onClick={() => setTriggersOpen(true)}
+            className="rounded-full border border-line bg-bg-card px-4 py-2 text-xs text-fg-mute transition hover:border-accent hover:text-accent"
+          >
+            Triggers
+          </button>
+          <button
+            onClick={() => setPolicyOpen(true)}
+            className="rounded-full border border-line bg-bg-card px-4 py-2 text-xs text-fg-mute transition hover:border-accent hover:text-accent"
+          >
+            Offer policy
+          </button>
+          <button
             onClick={openConnectModal}
             className="rounded-full bg-accent px-5 py-2 text-xs font-medium text-white shadow-[0_3px_10px_rgba(111,92,255,0.35)] transition hover:brightness-110"
           >
@@ -120,6 +136,16 @@ export function AudiencePane({ brandId, brandName }: Props) {
       <ProposedSegmentsModal brandId={brandId} />
       <CustomerDrawer brandId={brandId} />
       <SegmentDrawer brandId={brandId} />
+      <OfferPolicyPanel
+        brandId={brandId}
+        open={policyOpen}
+        onClose={() => setPolicyOpen(false)}
+      />
+      <TriggersPanel
+        brandId={brandId}
+        open={triggersOpen}
+        onClose={() => setTriggersOpen(false)}
+      />
     </main>
   )
 }

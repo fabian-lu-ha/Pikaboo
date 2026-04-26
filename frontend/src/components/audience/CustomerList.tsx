@@ -25,7 +25,7 @@ export function CustomerList() {
 
   return (
     <div className="rounded-2xl border border-line bg-bg-card p-2 shadow-[0_2px_10px_rgba(20,20,40,0.03)]">
-      <div className="max-h-[calc(100vh-280px)] overflow-y-auto pr-1 [scrollbar-width:thin]">
+      <div className="max-h-[calc(100vh-280px)] overflow-y-auto overscroll-contain pr-1 [scrollbar-width:thin]">
         <ul className="flex flex-col gap-1">
           {customers.map((c) => (
             <li key={c.id}>

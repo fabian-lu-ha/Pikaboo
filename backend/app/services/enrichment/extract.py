@@ -103,6 +103,46 @@ def _meta_basics(
     return title, desc, og_image, theme_color
 
 
+# Strings that mark an image as an award/certification badge rather than a
+# brand logo. Samsung.de showed Stiftung Warentest seals in the header and
+# our broad `header img` fallback grabbed those instead of the logo.
+_BADGE_TOKENS = (
+    "warentest",
+    "stiftung",
+    "award",
+    "rated",
+    "certified",
+    "certification",
+    "winner",
+    "best",
+    "siegel",  # German "seal"
+    "pruefsiegel",
+    "approved",
+    "guarantee",
+    "rating",
+    "trustpilot",
+)
+
+
+def _img_src(node) -> str | None:
+    if node is None:
+        return None
+    return node.attributes.get("src") or node.attributes.get("data-src")
+
+
+def _is_badge(href: str | None, node) -> bool:
+    """Heuristic: detect award/certification badges that masquerade as logos."""
+    if not href:
+        return False
+    haystack = href.lower()
+    if node is not None:
+        haystack += " " + (node.attributes.get("alt") or "").lower()
+        haystack += " " + (node.attributes.get("class") or "").lower()
+        haystack += " " + (node.attributes.get("id") or "").lower()
+        haystack += " " + (node.attributes.get("title") or "").lower()
+    return any(tok in haystack for tok in _BADGE_TOKENS)
+
+
 def _logo(
     metadata: dict, dom: HTMLParser, base: str, og_image: str | None
 ) -> str | None:
@@ -122,7 +162,7 @@ def _logo(
             if href:
                 return _abs(base, href)
 
-    # 2. <img> in header/nav — where marketing logos actually live
+    # 2. <img> in header/nav with explicit "logo" markers (alt/class/id/aria)
     for sel in (
         'header img[alt*="logo" i]',
         'header img[class*="logo" i]',
@@ -131,18 +171,33 @@ def _logo(
         'nav img[class*="logo" i]',
         'a[class*="logo" i] img',
         'a[aria-label*="logo" i] img',
+    ):
+        href = _img_src(dom.css_first(sel))
+        if href and not _is_badge(href, dom.css_first(sel)):
+            return _abs(base, href)
+
+    # 3. apple-touch-icon — almost always the brand mark (it's the home-screen
+    #    icon). Promoted ahead of broad header/nav fallbacks because those
+    #    catch award badges (Stiftung Warentest, "Rated #1", etc.).
+    apple = dom.css_first('link[rel="apple-touch-icon"]')
+    if apple:
+        href = apple.attributes.get("href")
+        if href:
+            return _abs(base, href)
+
+    # 4. broad header/nav fallbacks — last resort, but with badge filter
+    for sel in (
         'a[href="/"] img',
         'header a:first-of-type img',
         'header img',
         'nav img',
     ):
         node = dom.css_first(sel)
-        if node:
-            href = node.attributes.get("src") or node.attributes.get("data-src")
-            if href:
-                return _abs(base, href)
+        href = _img_src(node)
+        if href and not _is_badge(href, node):
+            return _abs(base, href)
 
-    # 3. inline <svg> in header/nav — modern sites render the logo as inline SVG
+    # 5. inline <svg> in header/nav — modern sites render the logo as inline SVG
     for sel in (
         'header svg[class*="logo" i]',
         'header svg[aria-label*="logo" i]',
@@ -164,14 +219,7 @@ def _logo(
         encoded = base64.b64encode(svg_html.encode("utf-8")).decode("ascii")
         return f"data:image/svg+xml;base64,{encoded}"
 
-    # 4. apple-touch-icon
-    apple = dom.css_first('link[rel="apple-touch-icon"]')
-    if apple:
-        href = apple.attributes.get("href")
-        if href:
-            return _abs(base, href)
-
-    # 5. largest <link rel="icon">
+    # 6. largest <link rel="icon">
     best_size = 0
     best_href: str | None = None
     for node in dom.css('link[rel~="icon"]'):
@@ -186,7 +234,7 @@ def _logo(
     if best_href:
         return _abs(base, best_href)
 
-    # 6. og:image as last resort
+    # 7. og:image as last resort
     return _abs(base, og_image)
 
 

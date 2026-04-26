@@ -1,0 +1,68 @@
+{
+  "aspect": "9:16",
+  "brand": {
+    "palette": ["#0f172a", "#f8fafc", "#38bdf8", "#fb923c"],
+    "palette_roles": [
+      { "hex": "#0f172a", "role": "background" },
+      { "hex": "#f8fafc", "role": "text" },
+      { "hex": "#38bdf8", "role": "accent" }
+    ],
+    "headline_font": "Inter",
+    "body_font": "Inter",
+    "caption_motion": "slide-up",
+    "caption_weight": 700,
+    "caption_tracking_em": -0.01,
+    "caption_all_caps": false
+  },
+  "title_card": {
+    "text": "Built for makers",
+    "duration_ms": 1400
+  },
+  "end_card": {
+    "headline": "Brewed for shipping",
+    "cta": "Try it free",
+    "duration_ms": 2000
+  },
+  "frames": [
+    {
+      "clip_url": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+      "caption": "Make every shot count",
+      "duration_ms": 3000,
+      "focal_zone": "mr",
+      "effects": [
+        {
+          "id": "f0_e0",
+          "kind": "kinetic_text",
+          "params": { "text": "NEW", "zone": "tl", "size": "lg", "color": "accent" },
+          "start_ms": 200,
+          "duration_ms": 1200
+        },
+        {
+          "id": "f0_e1",
+          "kind": "kinetic_lines",
+          "params": { "pattern": "underline" }
+        }
+      ]
+    },
+    {
+      "image_url": "https://placehold.co/1080x1920/38bdf8/0f172a/png?text=Slide+2",
+      "caption": "Brewed for shipping",
+      "duration_ms": 2500,
+      "focal_zone": "ml",
+      "effects": [
+        {
+          "id": "f1_e0",
+          "kind": "lower_third",
+          "params": { "title": "Acme Roastery", "subtitle": "Brooklyn, NY" }
+        },
+        {
+          "id": "f1_e1",
+          "kind": "data_pop",
+          "params": { "value": "67%", "zone": "tr", "variant": "bar" },
+          "start_ms": 800,
+          "duration_ms": 1400
+        }
+      ]
+    }
+  ]
+}

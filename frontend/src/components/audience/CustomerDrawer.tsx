@@ -13,6 +13,7 @@ import {
   type Touchpoint,
 } from '../../lib/audience'
 import { PersonalizeBlock } from './PersonalizeBlock'
+import { CampaignStoryboard } from './CampaignStoryboard'
 
 type Props = {
   brandId: string
@@ -56,7 +57,7 @@ export function CustomerDrawer({ brandId }: Props) {
             className="fixed right-0 top-0 z-40 flex h-screen w-[480px] max-w-[92vw] flex-col border-l border-line bg-bg shadow-[-12px_0_30px_rgba(20,20,40,0.06)]"
           >
             <Header customer={customer} maskEmail={maskEmail} setMaskEmail={setMaskEmail} onClose={close} />
-            <div className="flex-1 overflow-y-auto px-6 pb-8 [scrollbar-width:thin]">
+            <div className="flex-1 overflow-y-auto overscroll-contain px-6 pb-8 [scrollbar-width:thin]">
               {stats && <StatsRow stats={stats} />}
               {customer.tags.length > 0 && (
                 <Section label="Tags">
@@ -85,6 +86,17 @@ export function CustomerDrawer({ brandId }: Props) {
               </Section>
               <div className="mt-6">
                 <PersonalizeBlock
+                  brandId={brandId}
+                  targetKind="customer"
+                  targetId={customer.id}
+                  recipientLabel={
+                    customer.name?.trim() ||
+                    (maskEmail ? maskEmailString(customer.email) : customer.email)
+                  }
+                />
+              </div>
+              <div className="mt-8">
+                <CampaignStoryboard
                   brandId={brandId}
                   targetKind="customer"
                   targetId={customer.id}

@@ -239,6 +239,41 @@ _WORD_HINTS: dict[str, list[str]] = {
 }
 
 
+# Map FormatPicker ids (frontend Main.tsx) → backend channel ids.
+# Several frontend formats (instagram-post, instagram-video, carousel) all
+# resolve to the single `instagram` Channel; the variant intent rides along
+# in the prompt text so the LLM can lean carousel-vs-single appropriately.
+_FORMAT_TO_CHANNEL: dict[str, str] = {
+    "linkedin": "linkedin",
+    "instagram-post": "instagram",
+    "instagram-video": "instagram",
+    "tiktok-reel": "instagram",
+    "carousel": "instagram",
+}
+
+
+def resolve_channels_from_formats(formats: list[str]) -> list[Channel]:
+    """Translate explicit FormatPicker ids into backend Channels.
+
+    Preserves user-chosen order, dedupes when multiple formats map to the
+    same channel (e.g. `instagram-post` + `carousel` → one `instagram` run).
+    Unknown ids are skipped silently. Returns [] if nothing resolved — the
+    caller should fall back to `resolve_channels` in that case.
+    """
+    seen: set[str] = set()
+    out: list[Channel] = []
+    for f in formats:
+        cid = _FORMAT_TO_CHANNEL.get(f)
+        if not cid or cid in seen:
+            continue
+        ch = CHANNELS.get(cid)
+        if ch is None:
+            continue
+        out.append(ch)
+        seen.add(cid)
+    return out
+
+
 def resolve_channels(
     brand_data: dict, user_text: str
 ) -> list[Channel]:

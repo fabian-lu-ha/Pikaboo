@@ -78,7 +78,7 @@ export function ProposedSegmentsModal({ brandId }: Props) {
                 ✕
               </button>
             </header>
-            <div className="max-h-[70vh] overflow-y-auto px-6 py-5 [scrollbar-width:thin]">
+            <div className="max-h-[70vh] overflow-y-auto overscroll-contain px-6 py-5 [scrollbar-width:thin]">
               <ul className="flex flex-col gap-3">
                 {proposed.map((p, idx) => (
                   <ProposedRow

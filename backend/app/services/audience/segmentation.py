@@ -47,6 +47,24 @@ def _summarize_customer(
         if (e.payload or {}).get("category")
     )
 
+    # Feature-usage signals — read from CustomerEvent rows whose kind is
+    # one of FEATURE_EVENT_KINDS and whose payload carries a feature
+    # name. Surfaced to the LLM so it can propose feature-themed segments
+    # ("Heavy users of analytics_dashboard") in addition to RFM-style
+    # segments. The same signal flows into the storyboard planner so
+    # the per-segment ad spot can hero that feature.
+    from app.services.audience.feature_usage import (
+        FEATURE_EVENT_KINDS,
+        _feature_of,
+    )
+    feature_counter: Counter[str] = Counter()
+    for e in events:
+        if e.kind in FEATURE_EVENT_KINDS:
+            f = _feature_of(e)
+            if f:
+                feature_counter[f] += 1
+    top_features = [f for f, _ in feature_counter.most_common(3)]
+
     return {
         "customer_id": customer.id,
         "signup_days_ago": _days_ago(customer.signup_at),
@@ -55,6 +73,8 @@ def _summarize_customer(
         "purchase_count": len(purchases),
         "email_open_rate": round(open_rate, 2),
         "top_categories": [c for c, _ in categories.most_common(3)],
+        "top_features": top_features,
+        "feature_event_count": sum(feature_counter.values()),
         "tags": list(customer.tags or []),
     }
 
@@ -77,6 +97,11 @@ SEGMENT_SCHEMA = {
                         "type": "array",
                         "items": {"type": "string"},
                     },
+                    # Optional: when this segment is built around heavy
+                    # users of one product feature, the LLM names the
+                    # feature here. Becomes the visual hero of any ad
+                    # spot generated for this segment.
+                    "feature_focus": {"type": "string"},
                 },
                 "required": [
                     "name",
@@ -95,10 +120,21 @@ SEGMENT_SCHEMA = {
 SYSTEM = (
     "You are an audience strategist. You group customers into 3-6 actionable "
     "segments for marketing. Use only the structured signals provided "
-    "(spend, recency, open rate, categories, tags). Each segment must have a "
-    "clear name, a one-sentence description, a rationale explaining the "
-    "behavioral pattern, a short criteria_summary in plain English, and a "
-    "non-empty customer_ids list drawn ONLY from the input ids."
+    "(spend, recency, open rate, categories, top_features, feature_event_count, "
+    "tags). Each segment must have a clear name, a one-sentence description, "
+    "a rationale explaining the behavioral pattern, a short criteria_summary "
+    "in plain English, and a non-empty customer_ids list drawn ONLY from the "
+    "input ids.\n\n"
+    "FEATURE-DRIVEN SEGMENTS — when a cohort of customers shares a dominant "
+    "top_feature (e.g. multiple customers all have 'analytics_dashboard' as "
+    "their #1 used feature, or 'multi_account_switching' as a heavy thread), "
+    "propose a segment built around it and set ``feature_focus`` to that "
+    "feature name. Examples of good feature-driven segment names: 'Analytics "
+    "power users', 'Mobile-first creators', 'API-heavy integrators'. The "
+    "feature_focus field directly drives downstream ad-spot generation — the "
+    "video planner reads it and heros that feature in the visuals + voiceover. "
+    "Leave feature_focus empty for spend/recency/lifecycle segments where no "
+    "single feature dominates."
 )
 
 
@@ -159,6 +195,7 @@ async def propose_segments(db: Session, brand_id: str) -> list[dict]:
         ids = [cid for cid in (seg.get("customer_ids") or []) if cid in valid_ids]
         if not ids:
             continue
+        ff = (seg.get("feature_focus") or "").strip() or None
         segments.append(
             {
                 "name": str(seg.get("name") or "Untitled segment"),
@@ -166,6 +203,7 @@ async def propose_segments(db: Session, brand_id: str) -> list[dict]:
                 "rationale": str(seg.get("rationale") or ""),
                 "criteria_summary": str(seg.get("criteria_summary") or ""),
                 "customer_ids": ids,
+                "feature_focus": ff,
             }
         )
 

@@ -81,6 +81,110 @@ export const useOnboardingStore = create<State & Actions>((set) => ({
     set({ brandId: id, url, phase: 'scraping', error: null, activity: [] }),
 }))
 
+// ---------------------------------------------------------------------------
+// Reconcile store state from the /api/onboarding/status snapshot.
+// Called on mount of StepReading and on every SSE reconnect so that events
+// which fired before the connection existed are never lost.
+// ---------------------------------------------------------------------------
+type StatusBrand = {
+  id: string
+  url: string | null
+  logo_url: string | null
+  screenshots: string[]
+  theme_color: string | null
+  palette: string[]
+  palette_roles: PaletteEntry[]
+  handles: Record<string, string>
+  product_images: string[]
+  identity: Identity | null
+  voice_profile: VoiceProfile | null
+  recent_posts: Post[]
+  style_profile: StyleProfile | null
+  description: string | null
+  name: string | null
+  competitors: Array<{ id: string; name: string; url: string | null; reason: string | null; logo_url: string | null }>
+  onboarded_at: string | null
+}
+
+export async function reconcileFromStatus(): Promise<void> {
+  try {
+    const r = await fetch('/api/onboarding/status')
+    if (!r.ok) return
+    const d = (await r.json()) as { brand: StatusBrand | null }
+    if (!d.brand) return
+    const b = d.brand
+
+    // Derive which fields are populated and patch only non-null values so we
+    // don't overwrite data that arrived via a live event after this fetch started.
+    const patch: Partial<State> = {}
+
+    if (b.id && !useOnboardingStore.getState().brandId) {
+      patch.brandId = b.id
+      patch.url = b.url
+    }
+
+    const hasScreenshots = b.screenshots?.length > 0
+    const hasPalette = b.palette?.length > 0 || b.palette_roles?.length > 0
+
+    if ((hasScreenshots || hasPalette) && !useOnboardingStore.getState().scraped) {
+      patch.scraped = {
+        logo_url: b.logo_url,
+        screenshots: b.screenshots ?? [],
+        palette: b.palette ?? [],
+        palette_roles: b.palette_roles ?? [],
+        theme_color: b.theme_color,
+        title: b.name ?? null,
+        description: b.description ?? null,
+        handles: b.handles ?? {},
+        product_images: b.product_images ?? [],
+      }
+    }
+
+    const vp = b.voice_profile
+    if (vp && Object.keys(vp).length > 0 && !useOnboardingStore.getState().voice) {
+      patch.voice = vp as VoiceProfile
+    }
+
+    if (b.competitors?.length > 0 && useOnboardingStore.getState().competitors.length === 0) {
+      patch.competitors = b.competitors
+    }
+
+    if (b.recent_posts?.length > 0 && !useOnboardingStore.getState().posts_received) {
+      patch.posts = b.recent_posts
+      patch.posts_received = true
+    } else if (b.recent_posts !== undefined && !useOnboardingStore.getState().posts_received) {
+      // posts fetch completed but found nothing
+      patch.posts_received = true
+    }
+
+    const id = b.identity
+    if (id && Object.keys(id).length > 0 && !useOnboardingStore.getState().identity) {
+      patch.identity = id as Identity
+    }
+
+    const sp = b.style_profile
+    if (sp && Object.keys(sp).length > 0 && !useOnboardingStore.getState().style) {
+      patch.style = sp as StyleProfile
+    }
+
+    // Advance phase if we have enough data but phase is still idle/scraping
+    const currentPhase = useOnboardingStore.getState().phase
+    if (
+      patch.scraped !== undefined &&
+      (patch.voice !== undefined || patch.competitors !== undefined) &&
+      (currentPhase === 'idle' || currentPhase === 'scraping')
+    ) {
+      patch.phase = 'distilling'
+    }
+
+    if (Object.keys(patch).length > 0) {
+      useOnboardingStore.setState(patch)
+    }
+  } catch {
+    // non-fatal — SSE will keep delivering live events
+  }
+}
+
 let activityCounter = 0
 function pushActivity(label: string, kind: ActivityEntry['kind'] = 'event') {
   const at = new Date().toTimeString().slice(0, 8)

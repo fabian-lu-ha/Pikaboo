@@ -158,12 +158,99 @@ export type PeecTarget = {
   score: number
 }
 
+export type ResearchSource = {
+  title: string
+  url: string
+  snippet: string
+  bucket: 'company' | 'news' | 'trend' | 'topic' | 'competitor' | 'campaign' | string
+  score: number | null
+  published_date: string | null
+}
+
+export type ResearchScope = 'brand' | 'campaign'
+
+export type ResearchBundle = {
+  fetched_at: string
+  sources: ResearchSource[]
+  answer: string | null
+  error?: string | null
+  domain?: string | null
+  queries?: { label: string; query: string; bucket: string }[]
+  brand_id?: string
+  campaign_id?: string
+  user_request?: string
+}
+
 export type AgentDraft = {
   campaign_id: string
   channel: 'blog' | 'linkedin' | 'hero_image' | string
   title: string
   preview: string
   body: string
+}
+
+// ── Generative-Engine Optimization (GEO) types ──────────────────────────
+export type GeoActionType =
+  | 'comparison_page'
+  | 'definition_first'
+  | 'faq_schema'
+  | 'stats_quote'
+  | 'wikidata_schema'
+  | 'reddit_draft'
+
+export type GeoGapStatus = 'open' | 'addressed' | 'dismissed'
+export type GeoRecommendationStatus =
+  | 'proposed'
+  | 'accepted'
+  | 'rejected'
+  | 'generated'
+export type GeoAssetStatus = 'draft' | 'published'
+
+export type GeoGapPayload = {
+  id: string
+  brand_id: string
+  prompt: string
+  competitor_name: string | null
+  competitor_visibility: number | null
+  own_visibility: number | null
+  gap_score: number
+  cited_domains: string[]
+  engines_present: string[]
+  source_campaign_id: string | null
+  detected_at: string
+  status: GeoGapStatus
+}
+
+export type GeoRecommendationPayload = {
+  id: string
+  brand_id: string
+  gap_id: string
+  action_type: GeoActionType
+  action_label: string
+  confidence: number
+  rationale: string | null
+  target_engines: string[]
+  asset_outline: Record<string, unknown>
+  status: GeoRecommendationStatus
+  created_at: string
+}
+
+export type GeoAssetPayload = {
+  id: string
+  brand_id: string
+  recommendation_id: string
+  gap_id: string
+  action_type: GeoActionType
+  action_label: string
+  title: string | null
+  body_markdown: string | null
+  body_json: Record<string, unknown>
+  target_url: string | null
+  status: GeoAssetStatus
+  publish_url: string | null
+  predicted_lift_pct: number | null
+  created_at: string
+  published_at?: string | null
 }
 
 export type VideoAspect = '9:16' | '16:9' | '1:1'
@@ -196,6 +283,37 @@ export type StoryboardEndCard = {
   cta: string
 }
 
+// Motion-graphics overlays Remotion renders on top of each shot. Lifts the
+// composition above generic AI-stock-video output. 0-3 effects per shot.
+export type EffectKind =
+  | 'kinetic_text'
+  | 'lower_third'
+  | 'brand_stinger'
+  | 'spotlight'
+  | 'kinetic_lines'
+  | 'data_pop'
+
+export type EffectParams = {
+  text?: string
+  title?: string
+  subtitle?: string
+  value?: string
+  zone?: FocalZone
+  size?: 'sm' | 'md' | 'lg'
+  color?: 'accent' | 'text' | 'background'
+  radius?: 'sm' | 'md' | 'lg'
+  pattern?: 'diagonal' | 'horizontal' | 'underline' | 'frame'
+  variant?: 'number' | 'bar' | 'dot'
+}
+
+export type Effect = {
+  id: string
+  kind: EffectKind
+  params?: EffectParams
+  start_ms?: number | null
+  duration_ms?: number | null
+}
+
 export type CastBinding = {
   type: 'brand_asset' | 'needs_generation'
   asset_index?: number | null
@@ -218,18 +336,104 @@ export type StoryboardNarrative = {
   tone: string
 }
 
+export type CinematicBrief = {
+  reference_films: string
+  lensing: string
+  lighting: string
+  palette_grade: string
+  pacing: string
+  do_not: string
+}
+
+export type VoiceName =
+  | 'Aoede'
+  | 'Charon'
+  | 'Fenrir'
+  | 'Kore'
+  | 'Leda'
+  | 'Orus'
+  | 'Puck'
+  | 'Schedar'
+  | 'Vindemiatrix'
+  | 'Zephyr'
+
+export type VoiceoverSpec = {
+  script: string
+  voice_persona: string
+  voice_name: VoiceName
+}
+
+// Segment-aware storyboard targeting. When the user picks a segment in
+// the storyboard panel, /suggest receives this and threads feature_focus
+// through cinematic_brief, frames, and voiceover so different segments
+// get different ad spots from the same campaign.
+export type SegmentTarget = {
+  id: string
+  name: string
+  description: string
+  rationale: string
+  size: number
+  feature_focus: string | null
+  feature_stats: Record<string, number>
+  contributor_counts: Record<string, number>
+}
+
+// Brand-wide feature usage roll-up — returned from
+// GET /api/audience/feature-usage. Shown in the segment picker so the
+// user sees which features have a cohort big enough to warrant a
+// targeted ad spot.
+export type FeatureDistributionItem = {
+  feature: string
+  customer_count: number
+  event_count: number
+  last_seen: string | null
+}
+
+// Segment row as returned by GET /api/audience/segments.
+export type AudienceSegment = {
+  id: string
+  name: string
+  description: string | null
+  rationale: string | null
+  customer_ids: string[]
+  size: number
+  source: string
+  feature_focus: string | null
+  feature_stats: Record<string, unknown>
+  created_at: string | null
+}
+
+export type FrameKind = 'live_action' | 'design_sequence'
+export type DesignTemplate =
+  | 'gradient_kinetic'
+  | 'spec_card'
+  | 'ui_zoom'
+  | 'code_window'
+  | 'logo_reveal'
+  | 'comparison_split'
+  | 'text_scroll'
+  | 'headline_punch'
+  | 'word_kinetic'
+  | 'canvas_kinetic'
+
 export type StoryboardFrame = {
   id: string
+  // Defaults to 'live_action' on legacy storyboards (omitted field).
+  kind?: FrameKind
   prompt: string
   caption: string
   duration_ms: number
   cast_refs: string[]
   focal_zone: FocalZone
   motion?: string
+  effects?: Effect[]
+  // design_sequence-only — picks Remotion template + its params payload.
+  template?: DesignTemplate | null
+  template_params?: Record<string, unknown> | null
 }
 
 export type AgentEvents = {
-  'chat.submitted': { text: string }
+  'chat.submitted': { text: string; formats?: string[] }
   'agent.started': {
     campaign_id: string
     brand_id: string
@@ -249,6 +453,41 @@ export type AgentEvents = {
     target_prompts: PeecTarget[]
   }
   'agent.peec_unavailable': { campaign_id: string; reason: string }
+
+  'research.requested': {
+    scope: ResearchScope
+    scope_id: string
+    brand_id?: string | null
+    brand_name?: string
+    url?: string | null
+    user_request?: string
+  }
+  'research.source_added': {
+    scope: ResearchScope
+    scope_id: string
+    source: ResearchSource
+  }
+  'research.completed': {
+    scope: ResearchScope
+    scope_id: string
+    brand_id?: string | null
+    source_count: number
+    answer: string | null
+    sources: ResearchSource[]
+    fetched_at: string
+  }
+  'research.failed': {
+    scope: ResearchScope
+    scope_id: string
+    brand_id?: string | null
+    error: string
+  }
+  'research.unavailable': {
+    scope: ResearchScope
+    scope_id: string
+    brand_id?: string | null
+    reason: string
+  }
   'draft.created': AgentDraft
   'lift.predicted': { campaign_id: string } & LiftPrediction
   'campaign.bundled': {
@@ -274,6 +513,25 @@ export type AgentEvents = {
     }
   }
   'competitor.surged': { competitor: string; prompt: string; delta: number }
+  'competitor.intel_requested': {
+    competitor_id: string
+    competitor_name: string
+    url: string | null
+  }
+  'competitor.intel_source_added': {
+    competitor_id: string
+    source: ResearchSource
+  }
+  'competitor.intel_completed': {
+    competitor_id: string
+    competitor_name: string
+    source_count: number
+    answer: string | null
+    sources: ResearchSource[]
+    fetched_at: string
+  }
+  'competitor.intel_failed': { competitor_id: string; error: string }
+  'competitor.intel_unavailable': { competitor_id: string; reason: string }
   'linear.pr_merged': { pr: string; ship_ready: boolean }
 
   'video.storyboard_suggested': {
@@ -282,8 +540,11 @@ export type AgentEvents = {
     cast: CastMember[]
     frames: StoryboardFrame[]
     narrative?: StoryboardNarrative
+    cinematic_brief?: CinematicBrief
+    voiceover?: VoiceoverSpec
     title_card?: StoryboardTitleCard | null
     end_card?: StoryboardEndCard | null
+    segment?: SegmentTarget | null
   }
   'video.cast_proposed': {
     storyboard_id: string
@@ -346,9 +607,93 @@ export type AgentEvents = {
     quality?: VeoQuality
     from_keyframe?: boolean
   }
+  'video.scene_retrying': {
+    storyboard_id: string
+    frame_id: string
+    phase: 'submit' | 'poll'
+    attempt: number
+    max_attempts: number
+    delay_s: number
+    reason: string
+  }
   'video.render_started': Record<string, never>
-  'video.rendered': { video_url: string; duration_ms: number }
+  'video.rendered': {
+    video_id?: string
+    video_url: string
+    duration_ms: number
+  }
   'video.render_failed': { error: string }
+  'video.voiceover_generating': {
+    video_id: string
+    storyboard_id: string
+    voice_name: VoiceName
+    word_count: number
+  }
+  'video.voiceover_generated': {
+    video_id: string
+    storyboard_id: string
+    video_url: string
+    voice_name: VoiceName
+    script: string
+  }
+  'video.voiceover_failed': { video_id: string; error: string }
+
+  // Improvement loop — multimodal Gemini critic + version-aware re-render.
+  'video.critiquing': {
+    storyboard_id: string
+    video_url: string
+    frame_count: number
+  }
+  'video.critiqued': {
+    storyboard_id: string
+    weakness_count: number
+    mutation_count: number
+    summary: string
+    error?: string | null
+  }
+  'video.improvement_proposed': {
+    storyboard_id: string
+    mutations: {
+      id: string
+      target: string
+      cost: 'free' | 'render' | 'veo'
+      estimated_seconds: number
+    }[]
+  }
+  'video.improving_started': {
+    storyboard_id: string
+    mutation_count: number
+  }
+  'video.version_rendering': {
+    storyboard_id: string
+    frame_count: number
+  }
+  'video.version_rendered': {
+    storyboard_id: string
+    version_number: number
+    video_url: string
+    duration_ms: number
+    refired_frame_ids: string[]
+    applied_mutation_ids: string[]
+  }
+  'video.improvement_failed': {
+    storyboard_id: string
+    phase: 'apply' | 'render' | 'store'
+    error: string
+  }
+
+  // Asset-library AI-describer lifecycle. Library page listens to these
+  // to flip a card from a shimmer to the real description without
+  // polling.
+  'asset.describing': { asset_id: string; brand_id: string | null }
+  'asset.described': {
+    asset_id: string
+    brand_id: string | null
+    description: string | null
+    tags: string[]
+    cast_kind: 'character' | 'setting' | 'prop' | 'product' | null
+  }
+  'asset.describe_failed': { asset_id: string; reason: string }
 
   'onboarding.basics_saved': { brand_id: string; url: string }
   'onboarding.scraping': { brand_id: string; url: string }
@@ -466,6 +811,224 @@ export type AgentEvents = {
     brand_id: string
     competitor_id: string
     product_count: number
+  }
+
+  // Pioneer-AI per-tenant Gemma fine-tuning lifecycle. The corpus stage
+  // is the demo's *moat moment* — every sub-event below is rendered live
+  // in the Voice pane.
+  'voice.deep_scraping': { brand_id: string; url: string }
+  'voice.deep_scraped': {
+    brand_id: string
+    domain: string
+    discovered_urls: number
+    fetched_pages: number
+    text_chunks: number
+    by_kind: Record<string, number>
+  }
+  'voice.corpus_building': { brand_id: string }
+  'voice.corpus_built': {
+    brand_id: string
+    line_count: number
+    breakdown: Record<string, number>
+    jsonl_path: string
+  }
+  'voice.corpus_failed': { brand_id: string; error: string }
+  'voice.training_queued': {
+    brand_id: string
+    job_id: string
+    base_model: string
+    method: string
+    corpus_lines: number
+    simulator: boolean
+  }
+  'voice.training_progress': {
+    brand_id: string
+    job_id: string
+    status: string
+    progress: number
+    stage: string
+  }
+  'voice.model_ready': {
+    brand_id: string
+    model_id: string
+    adapter_url: string
+    base_model: string
+    corpus_lines: number
+    simulator: boolean
+  }
+  'voice.model_upgraded': {
+    brand_id: string
+    deployment_id: string
+    model_id: string | null
+    metrics: Record<string, unknown>
+  }
+  'voice.training_failed': { brand_id: string; error: string }
+
+  // Pipeline editor lifecycle. ``pipeline.saved`` fires on every persisted
+  // change; the run.* events stream node-by-node so the canvas can light
+  // each box up live as the executor walks the graph.
+  'pipeline.saved': {
+    pipeline_id: string
+    brand_id: string
+    name: string
+    node_count: number
+    edge_count: number
+    kind: 'created' | 'updated'
+  }
+  'pipeline.deleted': { pipeline_id: string; brand_id: string }
+  'pipeline.run_started': {
+    pipeline_id: string
+    run_id: string
+    brand_id: string
+    node_count: number
+  }
+  'pipeline.node_started': {
+    pipeline_id: string
+    run_id: string
+    node_id: string
+    kind: string
+    name: string | null
+  }
+  'pipeline.node_completed': {
+    pipeline_id: string
+    run_id: string
+    node_id: string
+    kind: string
+    preview: Record<string, unknown>
+  }
+  'pipeline.node_failed': {
+    pipeline_id: string
+    run_id: string
+    node_id: string
+    error: string
+  }
+  'pipeline.run_completed': {
+    pipeline_id: string
+    run_id: string
+    duration_ms: number
+    result: Record<string, unknown>
+  }
+  'pipeline.run_failed': {
+    pipeline_id: string
+    run_id: string
+    error: string
+  }
+
+  // 1:1 personalized campaigns & custom offers
+  'campaign.planning': {
+    brand_id: string
+    target_kind: 'customer' | 'segment'
+    target_id: string
+    trigger?: string | null
+  }
+  'campaign.planned': {
+    brand_id: string
+    campaign_id: string
+    target_kind: 'customer' | 'segment'
+    target_id: string
+    touch_count: number
+    offer_id: string | null
+  }
+  'campaign.touch_scheduled': {
+    brand_id: string
+    campaign_id: string
+    touch_id: string
+    step_index: number
+    kind: 'email' | 'video' | 'landing'
+    scheduled_at: string | null
+  }
+  'campaign.touch_sent': {
+    brand_id: string
+    campaign_id: string
+    touch_id: string
+    kind: 'email' | 'video' | 'landing'
+    send_id: string | null
+  }
+  'campaign.video_rendering': {
+    brand_id: string
+    campaign_id: string
+    touch_id: string
+    voice_model_id: string | null
+  }
+  'campaign.video_rendered': {
+    brand_id: string
+    campaign_id: string
+    touch_id: string
+    video_url: string
+    audio_url: string | null
+    voice_model_id: string | null
+  }
+  'campaign.video_render_failed': {
+    brand_id: string
+    campaign_id: string
+    touch_id: string
+    error: string
+  }
+  'campaign.trigger_fired': {
+    brand_id: string
+    rule_id: string
+    rule_label: string
+    customer_id: string | null
+    campaign_id: string | null
+    fired_at: string
+  }
+
+  'offer.generated': {
+    brand_id: string
+    offer_id: string
+    customer_id: string | null
+    segment_id: string | null
+    product_ids: string[]
+    discount_type: string | null
+    discount_value: number | null
+  }
+  'offer.policy_clamped': {
+    brand_id: string
+    offer_id: string | null
+    customer_id: string | null
+    segment_id: string | null
+    field: string
+    proposed: unknown
+    clamped: unknown
+    reason: string
+    clamped_at: string
+  }
+
+  // Generative-Engine Optimization lifecycle. The campaign loop fires
+  // gap_detected + action_proposed automatically once Peec returns;
+  // accept/reject are user-driven from the GeoPanel; asset_generating /
+  // generated stream the Gemini draft as it lands; published is the
+  // terminal state once the user has shipped it.
+  'geo.gap_detected': GeoGapPayload
+  'geo.action_proposed': GeoRecommendationPayload
+  'geo.action_rejected': {
+    id: string
+    brand_id: string
+    gap_id: string
+    action_type: GeoActionType
+  }
+  'geo.asset_generating': {
+    recommendation_id: string
+    brand_id: string
+    gap_id: string
+    action_type: GeoActionType
+    error?: string
+    status?: 'failed'
+  }
+  'geo.asset_generated': GeoAssetPayload
+  'geo.asset_published': GeoAssetPayload
+  'geo.scan_started': {
+    brand_id: string
+    source_campaign_id: string | null
+  }
+  'geo.scan_completed': {
+    brand_id: string
+    gap_count: number
+    source_campaign_id: string | null
+  }
+  'geo.scan_unavailable': {
+    brand_id: string
+    reason: string
   }
 }
 

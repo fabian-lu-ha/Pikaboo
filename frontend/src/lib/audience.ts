@@ -154,6 +154,160 @@ export function formatPrice(cents: number, currency = 'EUR'): string {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// 1:1 Campaigns & Custom Offers
+// ─────────────────────────────────────────────────────────────────────────
+
+export type CampaignTouchKind = 'email' | 'video' | 'landing'
+
+export type CampaignTouch = {
+  id: string
+  step_index: number
+  kind: CampaignTouchKind
+  scheduled_at: string | null
+  // Email content
+  subject?: string | null
+  body?: string | null
+  html_body?: string | null
+  // Video content
+  voiceover_script?: string | null
+  voice_model_id?: string | null
+  video_url?: string | null
+  audio_url?: string | null
+  // Landing content
+  headline?: string | null
+  // Status
+  status?: 'draft' | 'scheduled' | 'sending' | 'sent' | 'failed'
+  send_id?: string | null
+}
+
+export type DiscountType = 'percent' | 'fixed_amount' | 'free_shipping' | 'bogo'
+
+export type AddonKind = 'free_returns' | 'gift_wrap' | 'expedited_shipping'
+
+export type OfferRule = {
+  discount_type: DiscountType | null
+  discount_value: number | null
+  bundle_product_ids?: string[]
+  addons?: AddonKind[]
+}
+
+export type Offer = {
+  id: string
+  brand_id: string
+  customer_id: string | null
+  segment_id: string | null
+  product_ids: string[]
+  rule: OfferRule
+  reasoning: string | null
+  why_ours: string | null
+  expires_at: string | null
+  policy_clamps: PolicyClamp[]
+}
+
+export type PolicyClamp = {
+  field: string
+  proposed: unknown
+  clamped: unknown
+  reason: string
+  at?: string | null
+}
+
+export type CampaignTrigger =
+  | 'cart_abandoned'
+  | 'subscription_lapsed'
+  | 'new_arrival_in_category'
+  | 'manual'
+
+export type CampaignStatus = 'draft' | 'scheduled' | 'sending' | 'done'
+
+export type Campaign = {
+  id: string
+  brand_id: string
+  target_kind: 'customer' | 'segment'
+  target_id: string
+  trigger: CampaignTrigger
+  status: CampaignStatus
+  touches: CampaignTouch[]
+  offer: Offer | null
+  redaction_summary?: { entity_count: number; types: string[] }
+  policy_clamps?: PolicyClamp[]
+  created_at?: string | null
+}
+
+export type OfferPolicy = {
+  max_discount_pct: number
+  allowed_discount_types: DiscountType[]
+  allow_bundles: boolean
+  max_bundle_size: number
+  allowed_addons: AddonKind[]
+  expiration_max_days: number
+  max_total_redemptions?: number
+  forbid_urgency_language: boolean
+}
+
+export const DEFAULT_OFFER_POLICY: OfferPolicy = {
+  max_discount_pct: 25,
+  allowed_discount_types: ['percent', 'fixed_amount', 'free_shipping'],
+  allow_bundles: true,
+  max_bundle_size: 3,
+  allowed_addons: ['free_returns'],
+  expiration_max_days: 14,
+  forbid_urgency_language: false,
+}
+
+export type TriggerRule = {
+  rule_id: string
+  label: string
+  description: string | null
+  trigger_kind: CampaignTrigger
+  enabled: boolean
+}
+
+export type TriggerFire = {
+  rule_id: string
+  fired_at: string
+  customer_id: string | null
+  customer_name?: string | null
+  campaign_id: string | null
+}
+
+export type ClampEvent = {
+  id?: string | number
+  at: string
+  target_kind: 'customer' | 'segment' | 'brand'
+  target_id: string
+  field: string
+  proposed: unknown
+  clamped: unknown
+  reason: string
+}
+
+export const TOUCH_KIND_LABELS: Record<CampaignTouchKind, string> = {
+  email: 'Email',
+  video: 'Video',
+  landing: 'Landing',
+}
+
+export const TOUCH_KIND_GLYPHS: Record<CampaignTouchKind, string> = {
+  email: '✉',
+  video: '▶',
+  landing: '◇',
+}
+
+export const DISCOUNT_TYPE_LABELS: Record<DiscountType, string> = {
+  percent: 'Percent off',
+  fixed_amount: 'Fixed amount',
+  free_shipping: 'Free shipping',
+  bogo: 'BOGO',
+}
+
+export const ADDON_LABELS: Record<AddonKind, string> = {
+  free_returns: 'Free returns',
+  gift_wrap: 'Gift wrap',
+  expedited_shipping: 'Expedited shipping',
+}
+
 export function relativeFromIso(iso: string | null, now: number = Date.now()): string {
   if (!iso) return '—'
   const ts = Date.parse(iso)

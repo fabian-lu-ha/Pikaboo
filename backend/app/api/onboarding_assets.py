@@ -286,7 +286,7 @@ class CompetitorAddIn(BaseModel):
 # `router` has prefix=/onboarding. The lead's onboarding.py also has a
 # /onboarding/competitors POST — different path (this one is /add).
 @router.post("/competitors/add")
-def post_competitor_add(
+async def post_competitor_add(
     body: CompetitorAddIn, db: Annotated[Session, Depends(get_db)]
 ) -> dict:
     if not (body.brand_id or "").strip():

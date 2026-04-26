@@ -38,6 +38,44 @@ class AbsentPrompt:
 class CitedDomain:
     domain: str
     citation_count: int | None = None
+    rank: int | None = None
+    favicon_url: str | None = None
+
+
+@dataclass
+class EnginePoint:
+    """Per-engine visibility (ChatGPT / Perplexity / Gemini / Claude / etc.)."""
+
+    engine: str  # canonicalized lower-case key, e.g. "chatgpt"
+    label: str  # display label as Peec returned it
+    visibility: float | None = None
+    share_of_voice: float | None = None
+    rank: int | None = None
+    sample_count: int | None = None
+
+
+@dataclass
+class HistoryPoint:
+    """One bucket on the brand's visibility timeseries."""
+
+    date: str  # ISO-8601 date or datetime, whichever Peec returned
+    visibility: float | None = None
+    share_of_voice: float | None = None
+    sentiment: float | None = None
+
+
+@dataclass
+class PromptDetail:
+    """Rich per-prompt drill-down. Used by the dashboard's prompt modal."""
+
+    prompt: str
+    own_rank: int | None = None
+    own_visibility: float | None = None
+    winner: str | None = None
+    winner_visibility: float | None = None
+    engines: list[str] = field(default_factory=list)
+    cited_domains: list[str] = field(default_factory=list)
+    last_seen_at: str | None = None
 
 
 @dataclass
@@ -61,6 +99,10 @@ class PeecSnapshot:
     visible_on: list[VisiblePrompt] = field(default_factory=list)
     absent_from: list[AbsentPrompt] = field(default_factory=list)
     cited_domains: list[CitedDomain] = field(default_factory=list)
+    engines: list[EnginePoint] = field(default_factory=list)
+    history: list[HistoryPoint] = field(default_factory=list)
+    prompt_details: list[PromptDetail] = field(default_factory=list)
+    competitors: list[dict] = field(default_factory=list)
     raw_summary: dict = field(default_factory=dict)
 
     def to_event_payload(self) -> dict:
@@ -74,6 +116,8 @@ class PeecSnapshot:
             "visible_on": [asdict(v) for v in self.visible_on[:5]],
             "absent_from": [asdict(a) for a in self.absent_from[:5]],
             "cited_domains": [asdict(c) for c in self.cited_domains[:8]],
+            "engines": [asdict(e) for e in self.engines],
+            "history_points": len(self.history),
         }
 
 
@@ -102,7 +146,21 @@ def _to_int(v) -> int | None:
 
 async def fetch_snapshot(brand: dict) -> PeecSnapshot | None:
     """Pull a full visibility snapshot for the given brand.
-    Returns None if Peec isn't configured or the call failed."""
+
+    MCP-first: if the user has connected Peec via OAuth, fetch through the
+    MCP transport (richer demo, contest-credible). Falls back to the REST
+    client when MCP isn't available. Returns None when neither path is
+    configured."""
+    # MCP path — only succeeds when tokens are persisted on disk.
+    try:
+        from app.services.peec.mcp_snapshot import fetch_snapshot_via_mcp
+
+        mcp_snap = await fetch_snapshot_via_mcp(brand)
+        if mcp_snap is not None:
+            return mcp_snap
+    except Exception as e:  # noqa: BLE001 — fall through to REST
+        log.warning("peec.fetch_snapshot: MCP path errored: %s", e)
+
     peec = get_peec()
     if peec is None:
         return None
@@ -128,6 +186,7 @@ async def fetch_snapshot(brand: dict) -> PeecSnapshot | None:
 
     rows = peec._as_list(report) if isinstance(report, dict) else []
     own_summary: dict = {}
+    competitors: list[dict] = []
     for row in rows:
         if not isinstance(row, dict):
             continue
@@ -136,7 +195,21 @@ async def fetch_snapshot(brand: dict) -> PeecSnapshot | None:
         ).lower()
         if row_brand and brand_name_lc and row_brand == brand_name_lc:
             own_summary = row
-            break
+        elif row_brand:
+            competitors.append(
+                {
+                    "name": _f(row, "brand", "brand_name", "name") or "",
+                    "visibility": _to_float(
+                        _f(row, "visibility", "visibility_score", "share")
+                    ),
+                    "share_of_voice": _to_float(
+                        _f(row, "share_of_voice", "sov")
+                    ),
+                    "sentiment": _to_float(
+                        _f(row, "sentiment", "sentiment_score")
+                    ),
+                }
+            )
 
     own_visibility = _to_float(
         _f(own_summary, "visibility", "visibility_score", "share")
@@ -195,10 +268,12 @@ async def fetch_snapshot(brand: dict) -> PeecSnapshot | None:
         visible_on=visible,
         absent_from=absent,
         cited_domains=cited_domains,
+        competitors=competitors,
         raw_summary={
             "prompt_count": len(prompts),
             "had_brands_report": bool(rows),
             "matched_brand_row": bool(own_summary),
+            "via": "rest",
         },
     )
 

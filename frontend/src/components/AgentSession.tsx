@@ -8,6 +8,11 @@ import type {
   PeecTarget,
 } from '../events/bus'
 import { CHANNELS, CHANNEL_ORDER, aspectStyle, type ChannelMeta } from '../lib/channels'
+import { Storyboard } from './Storyboard'
+import { ResearchCard } from './ResearchCard'
+import ImageEditModal from './edit/ImageEditModal'
+import EditOverlayButtons from './edit/EditOverlayButtons'
+import type { EditAspect } from '../lib/imageEdit'
 
 export function AgentSession() {
   const session = useAgentSessionStore()
@@ -47,6 +52,7 @@ export function AgentSession() {
         {!session.peec && session.peecUnavailable && (
           <PeecUnavailableCard reason={session.peecUnavailable} />
         )}
+        <ResearchCard scope="campaign" />
         {channelDrafts.map((cd) => (
           <ChannelCard key={cd.meta.id} cd={cd} />
         ))}
@@ -55,6 +61,8 @@ export function AgentSession() {
         )}
         {session.lift && <LiftCard lift={session.lift} />}
       </div>
+
+      {channelDrafts.length > 0 && <Storyboard />}
 
       <AnimatePresence>
         {isBundled && session.bundle && (
@@ -83,16 +91,22 @@ type ChannelDraft = {
   meta: ChannelMeta
   text: AgentDraft | undefined
   imageUrl: string | null
+  // Did we receive an `_image` event for this channel yet, even an empty one?
+  // Empty body + this flag = generation failed; no event yet = still pending.
+  imageReceived: boolean
 }
 
 function collectChannels(drafts: AgentDraft[]): ChannelDraft[] {
   const textByChannel = new Map<string, AgentDraft>()
   const imageByChannel = new Map<string, string>()
+  const imageReceived = new Set<string>()
   for (const d of drafts) {
     if (d.channel === 'hero_image') continue
     if (d.channel.endsWith('_image')) {
       const cid = d.channel.replace(/_image$/, '')
-      imageByChannel.set(cid, d.body || d.preview)
+      imageReceived.add(cid)
+      const url = d.body || d.preview
+      if (url) imageByChannel.set(cid, url)
       continue
     }
     textByChannel.set(d.channel, d)
@@ -100,6 +114,7 @@ function collectChannels(drafts: AgentDraft[]): ChannelDraft[] {
   const present = new Set<string>([
     ...textByChannel.keys(),
     ...imageByChannel.keys(),
+    ...imageReceived,
   ])
   // Render in canonical order; unknown channels (newsletter, tiktok…) sort last.
   const ordered = [
@@ -110,6 +125,7 @@ function collectChannels(drafts: AgentDraft[]): ChannelDraft[] {
     meta: CHANNELS[cid] ?? fallbackMeta(cid),
     text: textByChannel.get(cid),
     imageUrl: imageByChannel.get(cid) ?? null,
+    imageReceived: imageReceived.has(cid),
   }))
 }
 
@@ -125,10 +141,38 @@ function fallbackMeta(id: string): ChannelMeta {
   }
 }
 
+function snapEditAspect(a: ChannelMeta['aspect']): EditAspect {
+  // The model only accepts 1:1 / 16:9 / 9:16. Map display aspects to the
+  // closest supported ratio so editing from a Twitter or 4:5 card still
+  // produces sensible results.
+  switch (a) {
+    case '1:1':
+      return '1:1'
+    case '9:16':
+      return '9:16'
+    case '4:5':
+      return '9:16'
+    case '1.91:1':
+      return '16:9'
+    case '16:9':
+    default:
+      return '16:9'
+  }
+}
+
 function ChannelCard({ cd }: { cd: ChannelDraft }) {
-  const { meta, text, imageUrl } = cd
+  const { meta, text, imageUrl, imageReceived } = cd
   const body = text?.body || text?.preview || ''
   const title = text?.title && meta.id === 'blog' ? text.title : ''
+  // Image received event but no URL → generation failed.
+  const imageFailed = imageReceived && !imageUrl
+  // Local override survives in this component instance even though the
+  // store-derived imageUrl might re-arrive on later events. The override
+  // wins so a user-initiated edit isn't clobbered by a stale event.
+  const [editedUrl, setEditedUrl] = useState<string | null>(null)
+  const [editMode, setEditMode] = useState<'inpaint' | 'sketch' | null>(null)
+  const displayUrl = editedUrl ?? imageUrl
+  const editAspect = snapEditAspect(meta.aspect)
   return (
     <motion.article
       initial={{ opacity: 0, y: 8 }}
@@ -156,16 +200,59 @@ function ChannelCard({ cd }: { cd: ChannelDraft }) {
       </header>
 
       <div className="grid gap-0 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        {imageUrl ? (
+        {displayUrl ? (
           <div
-            className="overflow-hidden border-b border-line-soft md:border-b-0 md:border-r"
+            className="group relative overflow-hidden border-b border-line-soft md:border-b-0 md:border-r"
             style={{ aspectRatio: aspectStyle(meta.aspect) }}
           >
             <img
-              src={imageUrl}
+              src={displayUrl}
               alt=""
+              loading="eager"
+              decoding="async"
+              fetchPriority="high"
               className="block h-full w-full object-cover"
             />
+            <EditOverlayButtons
+              onInpaint={() => setEditMode('inpaint')}
+              onSketch={() => setEditMode('sketch')}
+            />
+            {editMode === 'inpaint' && (
+              <ImageEditModal
+                mode="inpaint"
+                open
+                sourceUrl={displayUrl}
+                aspect={editAspect}
+                scope="channel"
+                scopeId={meta.id}
+                onClose={() => setEditMode(null)}
+                onResult={(u) => setEditedUrl(u)}
+              />
+            )}
+            {editMode === 'sketch' && (
+              <ImageEditModal
+                mode="sketch"
+                open
+                aspect={editAspect}
+                scope="channel"
+                scopeId={meta.id}
+                onClose={() => setEditMode(null)}
+                onResult={(u) => setEditedUrl(u)}
+              />
+            )}
+          </div>
+        ) : imageFailed ? (
+          <div
+            className="grid place-items-center border-b border-line-soft bg-bg-soft/40 px-4 text-center text-[11px] text-fg-mute md:border-b-0 md:border-r"
+            style={{ aspectRatio: aspectStyle(meta.aspect) }}
+          >
+            <div>
+              <div className="font-medium text-fg">Image unavailable</div>
+              <div className="mt-1 text-fg-dim">
+                Generation failed — check server logs (likely missing
+                GEMINI_API_KEY or quota).
+              </div>
+            </div>
           </div>
         ) : text ? (
           <div
@@ -232,7 +319,7 @@ function Activity({
           <span className="text-danger">· {error.slice(0, 80)}</span>
         )}
       </div>
-      <ul className="mt-3 max-h-56 space-y-1.5 overflow-y-auto pr-1 font-mono text-[11px] leading-relaxed [scrollbar-width:thin]">
+      <ul className="mt-3 max-h-56 space-y-1.5 overflow-y-auto overscroll-contain pr-1 font-mono text-[11px] leading-relaxed [scrollbar-width:thin]">
         <AnimatePresence initial={false}>
           {steps.map((s) => (
             <motion.li
@@ -259,6 +346,9 @@ function Activity({
 }
 
 function HeroCard({ src }: { src: string }) {
+  const [editedUrl, setEditedUrl] = useState<string | null>(null)
+  const [editMode, setEditMode] = useState<'inpaint' | 'sketch' | null>(null)
+  const displayUrl = editedUrl ?? src
   return (
     <motion.figure
       initial={{ opacity: 0, scale: 0.98 }}
@@ -275,7 +365,43 @@ function HeroCard({ src }: { src: string }) {
         </div>
         <span className="text-xs text-fg-dim">conditioned on your palette + identity</span>
       </header>
-      <img src={src} alt="" className="block w-full" />
+      <div className="group relative">
+        <img
+          src={displayUrl}
+          alt=""
+          loading="eager"
+          decoding="async"
+          fetchPriority="high"
+          className="block w-full"
+        />
+        <EditOverlayButtons
+          onInpaint={() => setEditMode('inpaint')}
+          onSketch={() => setEditMode('sketch')}
+        />
+      </div>
+      {editMode === 'inpaint' && (
+        <ImageEditModal
+          mode="inpaint"
+          open
+          sourceUrl={displayUrl}
+          aspect="16:9"
+          scope="hero"
+          scopeId={null}
+          onClose={() => setEditMode(null)}
+          onResult={(u) => setEditedUrl(u)}
+        />
+      )}
+      {editMode === 'sketch' && (
+        <ImageEditModal
+          mode="sketch"
+          open
+          aspect="16:9"
+          scope="hero"
+          scopeId={null}
+          onClose={() => setEditMode(null)}
+          onResult={(u) => setEditedUrl(u)}
+        />
+      )}
     </motion.figure>
   )
 }
@@ -443,6 +569,7 @@ function CampaignReady({
   bundle: CampaignBundleShape
 }) {
   const [toast, setToast] = useState<string | null>(null)
+  const [copiedButton, setCopiedButton] = useState<string | null>(null)
 
   function flash(msg: string) {
     setToast(msg)
@@ -461,6 +588,8 @@ function CampaignReady({
     try {
       await navigator.clipboard.writeText(lines.join('\n').trim())
       flash('copied to clipboard')
+      setCopiedButton('copy')
+      window.setTimeout(() => setCopiedButton(null), 1500)
     } catch {
       flash('clipboard blocked — select manually')
     }
@@ -480,7 +609,11 @@ function CampaignReady({
     ]
     navigator.clipboard
       .writeText(lines.join('\n'))
-      .then(() => flash('Slack-ready post copied'))
+      .then(() => {
+        flash('Slack-ready post copied')
+        setCopiedButton('slack')
+        window.setTimeout(() => setCopiedButton(null), 1500)
+      })
       .catch(() => flash('clipboard blocked'))
   }
 
@@ -502,13 +635,13 @@ function CampaignReady({
           onClick={copyAll}
           className="rounded-full border border-line bg-bg-card px-4 py-2 text-xs text-fg-mute hover:border-accent hover:text-accent"
         >
-          Copy all
+          {copiedButton === 'copy' ? '✓ Copied' : 'Copy all'}
         </button>
         <button
           onClick={shipToSlack}
           className="rounded-full bg-accent px-5 py-2 text-xs font-medium text-white shadow-[0_3px_10px_rgba(111,92,255,0.35)] hover:brightness-110"
         >
-          Ship to Slack
+          {copiedButton === 'slack' ? '✓ Slack-ready copied' : 'Ship to Slack'}
         </button>
       </div>
       <AnimatePresence>

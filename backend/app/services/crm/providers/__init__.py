@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 from app.services.crm.providers.base import CRMProvider
+from app.services.crm.providers.hubspot import HubSpotCRMProvider
 from app.services.crm.providers.mock import MockCRMProvider
 
-# HubSpot / Klaviyo / Shopify: scaffold lives in the abstraction; concrete
+# Klaviyo / Shopify scaffolding still lives in the abstraction; concrete
 # adapters land later. Add them here when implemented.
 _REGISTRY: dict[str, CRMProvider] = {
     "mock": MockCRMProvider(),
+    "hubspot": HubSpotCRMProvider(),
 }
 
 

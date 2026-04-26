@@ -1,0 +1,95 @@
+{
+  "aspect": "16:9",
+  "brand": {
+    "palette": ["#0f172a", "#1e293b", "#38bdf8", "#fb923c"],
+    "palette_roles": [
+      { "hex": "#0f172a", "role": "background" },
+      { "hex": "#f8fafc", "role": "text" },
+      { "hex": "#38bdf8", "role": "accent" }
+    ],
+    "headline_font": "Inter",
+    "body_font": "Inter",
+    "caption_motion": "slide-up",
+    "caption_weight": 700,
+    "caption_tracking_em": -0.01,
+    "caption_all_caps": false
+  },
+  "brand_name": "Acme",
+  "frames": [
+    {
+      "kind": "design_sequence",
+      "template": "gradient_kinetic",
+      "duration_ms": 2500,
+      "params": {
+        "template": "gradient_kinetic",
+        "headline": "Built for builders",
+        "subtitle": "Ship faster. Ship better."
+      }
+    },
+    {
+      "kind": "design_sequence",
+      "template": "spec_card",
+      "duration_ms": 2500,
+      "params": {
+        "template": "spec_card",
+        "value": "3.5",
+        "unit": "x",
+        "label": "faster than the competition",
+        "theme": "light"
+      }
+    },
+    {
+      "kind": "design_sequence",
+      "template": "code_window",
+      "duration_ms": 3500,
+      "params": {
+        "template": "code_window",
+        "language": "ts",
+        "theme": "dark",
+        "lines": [
+          "import { Acme } from 'acme';",
+          "",
+          "const result = await Acme.run();",
+          "console.log(result.score);"
+        ]
+      }
+    },
+    {
+      "kind": "design_sequence",
+      "template": "logo_reveal",
+      "duration_ms": 3000,
+      "params": {
+        "template": "logo_reveal",
+        "wordmark": "ACME",
+        "tagline": "Brewed for shipping"
+      }
+    },
+    {
+      "kind": "design_sequence",
+      "template": "comparison_split",
+      "duration_ms": 3000,
+      "params": {
+        "template": "comparison_split",
+        "orientation": "v",
+        "before": { "label": "Manual workflow" },
+        "after": { "label": "Acme automation" }
+      }
+    },
+    {
+      "kind": "design_sequence",
+      "template": "ui_zoom",
+      "duration_ms": 3000,
+      "params": {
+        "template": "ui_zoom",
+        "focus_zone": "tr",
+        "label": "98% accuracy"
+      }
+    },
+    {
+      "clip_url": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+      "caption": "Live-action still works",
+      "duration_ms": 2500,
+      "focal_zone": "mc"
+    }
+  ]
+}

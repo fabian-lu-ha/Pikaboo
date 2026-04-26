@@ -9,6 +9,7 @@ Stack (per docs/CHANNEL_PLAYBOOK.md §4):
 """
 
 from app.services.agent.channels import Channel
+from app.services.research.orchestrator import research_to_prompt_block
 
 
 def _voice_block(brand: dict) -> str:
@@ -77,6 +78,31 @@ def _reference_brands_block(brand: dict, max_refs: int = 3) -> str:
     )
 
 
+def _research_block(brand: dict) -> str:
+    """Combine the persisted brand-level research (set during onboarding)
+    with the freshly-pulled campaign-level research (set on this run) into
+    one grounding block. Campaign sources go first because they're tied to
+    the user's actual request; brand sources are background context."""
+    parts: list[str] = []
+    camp = brand.get("_campaign_research") or {}
+    if camp.get("sources") or camp.get("answer"):
+        block = research_to_prompt_block(
+            camp.get("sources") or [], camp.get("answer")
+        )
+        if block:
+            parts.append("# Live web research for this request\n" + block)
+    brand_research = brand.get("research") or {}
+    if brand_research.get("sources") or brand_research.get("answer"):
+        block = research_to_prompt_block(
+            brand_research.get("sources") or [],
+            brand_research.get("answer"),
+            cap=8,
+        )
+        if block:
+            parts.append("# Brand background research\n" + block)
+    return "\n\n".join(parts)
+
+
 def _competitor_block(brand: dict) -> str:
     comps = brand.get("competitors") or []
     if not comps:
@@ -134,6 +160,7 @@ def channel_post_messages(
                 f"{_recent_posts_block(brand)}\n\n"
                 f"{_reference_brands_block(brand)}\n\n"
                 f"{_competitor_block(brand)}\n\n"
+                f"{_research_block(brand)}\n\n"
                 f"User request: {user_request}\n\n"
                 f"{output_hint}"
             ),

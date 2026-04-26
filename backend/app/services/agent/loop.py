@@ -19,6 +19,7 @@ from app.services.agent.channels import (
     Channel,
     extract_text,
     resolve_channels,
+    resolve_channels_from_formats,
     schema_for,
 )
 from app.services.agent.image_gen import generate_channel_image
@@ -31,6 +32,7 @@ from app.services.peec import (
     get_peec,
     select_target_prompts,
 )
+from app.services.research import gather_campaign_context
 
 log = logging.getLogger(__name__)
 
@@ -62,6 +64,15 @@ async def run_agent(payload: dict) -> None:
     if not text:
         return
 
+    # Optional explicit format ids from the frontend FormatPicker. When set,
+    # they override the keyword-based channel heuristic — picking LinkedIn
+    # alone produces only a LinkedIn draft, picking LinkedIn + Instagram
+    # produces both, and so on.
+    raw_formats = payload.get("formats") or []
+    requested_formats: list[str] = [
+        str(f) for f in raw_formats if isinstance(f, str) and f.strip()
+    ]
+
     brand_data = _load_latest_brand()
     if brand_data is None:
         bus.emit(Events.AGENT_FAILED, {"error": "no onboarded brand"})
@@ -83,20 +94,44 @@ async def run_agent(payload: dict) -> None:
         f"scanning {len(brand_data['competitors'])} competitors",
     )
 
-    # ── Peec visibility snapshot (real data when available, mock fallback) ──
-    peec_snapshot, target_prompts = await _resolve_target_prompts(
-        campaign_id, brand_data
+    # ── Peec visibility + Tavily research run in parallel ────────────────
+    # Both are network-bound, neither blocks the other. Research output
+    # gets injected into each channel's drafting prompt so blog/social
+    # copy is grounded in fresh sources rather than priors.
+    await _step(campaign_id, "fetching peec visibility + live web research")
+    peec_result, research_bundle = await asyncio.gather(
+        _resolve_target_prompts(campaign_id, brand_data),
+        _resolve_research(campaign_id, brand_data, text),
     )
+    peec_snapshot, target_prompts = peec_result
+    brand_data["_campaign_research"] = research_bundle.to_dict()
 
     # ── Per-channel drafts in PARALLEL (one text + one image per channel) ──
-    channels = resolve_channels(brand_data, text)
+    # When the user picked explicit formats in the FormatPicker, honour them
+    # exactly — no auto-adding `blog` or other channels from brand handles.
+    # If the resolution yields nothing (unknown ids only) we fall back to
+    # the heuristic so a typo doesn't kill the whole run.
+    channels: list[Channel] = []
+    if requested_formats:
+        channels = resolve_channels_from_formats(requested_formats)
+    if not channels:
+        channels = resolve_channels(brand_data, text)
+
+    # Inject format-variant hints (e.g. "carousel") into the prompt text so
+    # that within a single channel (instagram) the LLM picks up the intended
+    # variant. Channel selection itself was already constrained above.
+    drafter_text = text
+    if requested_formats:
+        labels = ", ".join(requested_formats)
+        drafter_text = f"{text}\n\n[Output formats requested: {labels}]"
+
     await _step(
         campaign_id,
         f"drafting {len(channels)} channels in parallel: "
         + ", ".join(c.label for c in channels),
     )
     drafts_for_bundle: list[dict] = await asyncio.gather(
-        *(_run_channel(campaign_id, brand_data, channel, text) for channel in channels)
+        *(_run_channel(campaign_id, brand_data, channel, drafter_text) for channel in channels)
     )
 
     blog = next(
@@ -149,9 +184,14 @@ async def run_agent(payload: dict) -> None:
             if peec_snapshot is not None
             else None
         ),
+        "research": research_bundle.to_dict(),
     }
 
     try:
+        # The run-checkpoint listener (services/agent/checkpoints.py) creates
+        # the Campaign row eagerly on agent.started and patches it on every
+        # progress event, so we use ``merge`` here to upsert without a
+        # primary-key collision when this final write races the listener.
         with SessionLocal() as db:
             camp = models.Campaign(
                 id=campaign_id,
@@ -160,7 +200,7 @@ async def run_agent(payload: dict) -> None:
                 bundle=bundle,
                 predicted_lift=lift.get("lift_percent"),
             )
-            db.add(camp)
+            db.merge(camp)
             db.commit()
     except Exception as e:
         log.exception("campaign persist failed: %s", e)
@@ -176,6 +216,51 @@ async def run_agent(payload: dict) -> None:
         },
     )
 
+    # ── GEO optimization fan-out ─────────────────────────────────────────
+    # Once the campaign is bundled and the user can see drafts, kick off
+    # GEO gap detection + recommendation in the background. The dashboard's
+    # GeoPanel subscribes to the GEO_* events and fills in opportunities
+    # without the user lifting a finger. Reuse the snapshot we already
+    # fetched so we don't re-hit Peec.
+    if peec_snapshot is not None:
+        try:
+            from app.services.geo.gap_detector import (
+                detect_gaps_for_brand,
+                scan_for_brand,
+            )
+
+            async def _geo_fanout() -> None:
+                gap_ids = await detect_gaps_for_brand(
+                    brand_data["id"],
+                    snapshot=peec_snapshot,
+                    source_campaign_id=campaign_id,
+                )
+                if not gap_ids:
+                    return
+                # detect_gaps_for_brand already emits GEO_GAP_DETECTED per
+                # gap; now spawn the recommender for each.
+                from app.services.geo.recommender import recommend_for_gap
+
+                await asyncio.gather(
+                    *(_safe(recommend_for_gap, gid) for gid in gap_ids),
+                    return_exceptions=False,
+                )
+
+            asyncio.create_task(_geo_fanout())
+            # Reference scan_for_brand to pacify import-checkers — we use the
+            # lower-level path here to avoid double-emitting GEO_SCAN_STARTED.
+            _ = scan_for_brand
+        except Exception as e:  # noqa: BLE001 — never block campaign on GEO
+            log.warning("geo fan-out scheduling failed: %s", e)
+
+
+async def _safe(fn, *args, **kwargs):
+    try:
+        return await fn(*args, **kwargs)
+    except Exception as e:  # noqa: BLE001
+        log.warning("geo fan-out task crashed in %s: %s", fn.__name__, e)
+        return None
+
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -190,6 +275,7 @@ async def _run_channel(
     text_draft = await _safe_chat_json(
         channel_post_messages(brand_data, channel, user_request),
         schema_for(channel),
+        brand_id=brand_data.get("id"),
     )
     title, body = extract_text(channel, text_draft)
     bus.emit(
@@ -223,6 +309,26 @@ async def _run_channel(
                     "body": image_url,
                 },
             )
+        else:
+            # Always emit a marker — even on failure — so the frontend stops
+            # showing "generating image…" forever. Empty body/preview is the
+            # signal that this channel's image is unavailable. The actual
+            # reason (no GEMINI_API_KEY, quota, safety block, storage write
+            # failed) is in the server log warnings from _try_channel_image.
+            await _step(
+                campaign_id,
+                f"image unavailable for {channel.label} — see server logs",
+            )
+            bus.emit(
+                Events.DRAFT_CREATED,
+                {
+                    "campaign_id": campaign_id,
+                    "channel": f"{channel.id}_image",
+                    "title": f"{channel.label} image unavailable",
+                    "preview": "",
+                    "body": "",
+                },
+            )
 
     return {
         "channel": channel.id,
@@ -248,9 +354,11 @@ async def _step(campaign_id: str, label: str) -> None:
     await asyncio.sleep(0.05)
 
 
-async def _safe_chat_json(messages: list[dict], schema: dict) -> dict | None:
+async def _safe_chat_json(
+    messages: list[dict], schema: dict, brand_id: str | None = None
+) -> dict | None:
     try:
-        return await chat_json(messages, schema=schema)
+        return await chat_json(messages, schema=schema, brand_id=brand_id)
     except Exception as e:
         log.warning("agent draft chat_json failed: %s", e)
         return None
@@ -288,8 +396,36 @@ def _placeholder_target_prompts(brand_data: dict) -> list[str]:
     return [
         f"best alternatives to {name}",
         f"{name} vs Salesforce" if "crm" in desc.lower() else f"{name} vs the leader",
-        f"how to {desc.split(' ', 1)[0].lower() or 'pick'} a {name.lower()}",
+        f"how to {desc.split(' ', 1)[0].lower() or 'pick'} {name.lower()} alternatives",
     ][:3]
+
+
+async def _resolve_research(
+    campaign_id: str, brand_data: dict, user_request: str
+):
+    """Tavily campaign research — fail-soft. Returns a CampaignResearch
+    bundle (possibly empty) so the caller can always serialize it into the
+    campaign and pass it through to draft prompts."""
+    try:
+        return await gather_campaign_context(
+            campaign_id=campaign_id,
+            brand_id=brand_data.get("id"),
+            brand_name=brand_data.get("name") or "the brand",
+            description=brand_data.get("description"),
+            user_request=user_request,
+        )
+    except Exception:
+        log.exception("campaign research crashed")
+        from app.services.research.orchestrator import CampaignResearch
+        from datetime import datetime as _dt, timezone as _tz
+
+        return CampaignResearch(
+            campaign_id=campaign_id,
+            brand_id=brand_data.get("id"),
+            user_request=user_request,
+            fetched_at=_dt.now(_tz.utc).isoformat(),
+            error="research crashed",
+        )
 
 
 async def _resolve_target_prompts(
@@ -373,6 +509,7 @@ def _load_latest_brand() -> dict | None:
             "assets": brand.assets or [],
             "reference_brands": brand.reference_brands or [],
             "handles": brand.handles or {},
+            "research": brand.research or {},
             "competitors": [
                 {
                     "name": c.name,

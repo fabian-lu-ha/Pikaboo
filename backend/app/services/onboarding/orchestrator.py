@@ -22,6 +22,7 @@ from app.services.pipeline import (
     enrich_visual,
     visual_to_event_payload,
 )
+from app.services.research import gather_brand_context
 from app.services.social import Post, post_to_dict
 from app.services.social import instagram as social_instagram
 from app.services.social import linkedin as social_linkedin
@@ -371,18 +372,67 @@ async def run(brand_id: str) -> None:
         screenshots_for_style = await _reload_screenshot_bytes(
             brand_id, len(visual.screenshots)
         )
+        brand_description = brand.description
+        # snapshot competitors for the research call before we drop the session
+        research_competitors = [
+            {"name": c.name, "url": c.url} for c in brand.competitors
+        ]
     finally:
         db.close()
 
-    # Post-enrichment runs without the main session held — opens fresh
-    # short-lived sessions for each write.
-    await _run_post_enrichment(
-        brand_id=brand_id,
-        handles=brand_handles,
-        screenshots=screenshots_for_style,
-        brand_name=brand_name or "",
-        palette=brand_palette,
+    # Post-enrichment + research run without the main session held — they
+    # each open fresh short-lived sessions for their own writes. Research is
+    # parallel to style/posts because Tavily is network-bound and the LLM
+    # for style analysis is GPU-bound; no shared state.
+    await asyncio.gather(
+        _run_post_enrichment(
+            brand_id=brand_id,
+            handles=brand_handles,
+            screenshots=screenshots_for_style,
+            brand_name=brand_name or "",
+            palette=brand_palette,
+        ),
+        _run_research(
+            brand_id=brand_id,
+            brand_name=brand_name or "",
+            brand_url=url,
+            description=brand_description,
+            competitors=research_competitors,
+        ),
     )
+
+
+async def _run_research(
+    *,
+    brand_id: str,
+    brand_name: str,
+    brand_url: str | None,
+    description: str | None,
+    competitors: list[dict],
+) -> None:
+    """Tavily research leg — fail-soft, persists onto Brand.research."""
+    try:
+        bundle = await gather_brand_context(
+            brand_id=brand_id,
+            brand_name=brand_name,
+            brand_url=brand_url,
+            description=description,
+            competitors=competitors,
+        )
+    except Exception:
+        log.exception("brand research crashed")
+        return
+
+    payload = bundle.to_dict()
+    try:
+        with SessionLocal() as bdb:
+            row = bdb.get(models.Brand, brand_id)
+            if row is not None:
+                row.research = payload
+                bdb.add(row)
+                bdb.commit()
+    except Exception:
+        log.exception("brand research persist failed")
 
 
 async def _reload_screenshot_bytes(

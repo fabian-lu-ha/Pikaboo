@@ -1,17 +1,47 @@
-import { useState, Fragment } from 'react'
+import { useState, Fragment, useEffect } from 'react'
 import { motion } from 'motion/react'
 import { useOnboardingStore } from '../stores/onboardingStore'
+import type { Identity, VoiceProfile } from '../events/bus'
 import { StepBasics } from './StepBasics'
 import { StepReferences } from './StepReferences'
 import { StepReading } from './StepReading'
 import { StepReview } from './StepReview'
 
-type Stage = 'basics' | 'references' | 'reading' | 'review'
+export type Stage = 'basics' | 'references' | 'reading' | 'review'
 
-export function OnboardingFlow({ onComplete }: { onComplete: () => void }) {
-  const [stage, setStage] = useState<Stage>('basics')
+type ResumeBrand = {
+  id: string
+  name: string
+  url: string | null
+  identity: Record<string, unknown> | null
+  voice_profile: Record<string, unknown> | null
+  [key: string]: unknown
+}
+
+export function OnboardingFlow({
+  onComplete,
+  initialStage = 'basics',
+  resumeBrand = null,
+}: {
+  onComplete: () => void
+  initialStage?: Stage
+  resumeBrand?: ResumeBrand | null
+}) {
+  const [stage, setStage] = useState<Stage>(initialStage)
   const error = useOnboardingStore((s) => s.error)
   const reset = useOnboardingStore((s) => s.reset)
+
+  // Hydrate store from existing brand data so panels are pre-filled on resume
+  useEffect(() => {
+    if (!resumeBrand) return
+    useOnboardingStore.setState({
+      brandId: resumeBrand.id,
+      url: resumeBrand.url ?? null,
+      // Cast via unknown — shapes match; backend guarantees the same structure
+      identity: (resumeBrand.identity as unknown as Identity) ?? null,
+      voice: (resumeBrand.voice_profile as unknown as VoiceProfile) ?? null,
+    })
+  }, [resumeBrand])
 
   function startOver() {
     reset()

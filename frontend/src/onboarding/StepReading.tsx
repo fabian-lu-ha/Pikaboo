@@ -1,8 +1,10 @@
-import type { ReactNode } from 'react'
+import { type ReactNode, useEffect } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
-import { useOnboardingStore } from '../stores/onboardingStore'
+import { useOnboardingStore, reconcileFromStatus } from '../stores/onboardingStore'
+import { useResearchStore } from '../stores/researchStore'
 import { InitialsAvatar } from '../components/InitialsAvatar'
 import { IdentityCard } from './IdentityCard'
+import { ResearchCard } from '../components/ResearchCard'
 import type {
   CompetitorSuggestion,
   Post,
@@ -21,6 +23,27 @@ type ActivityEntry = ReturnType<
 type EnrichedCompetitor = CompetitorSuggestion & { logo_url?: string | null }
 
 export function StepReading({ onAdvance }: { onAdvance: () => void }) {
+  // On mount, hydrate store from DB in case SSE events fired before this
+  // panel was visible (e.g. user lingered on step 02, or SSE reconnected).
+  useEffect(() => {
+    reconcileFromStatus().catch(() => {/* non-fatal */})
+    // Same idea for research — pull persisted brand research so the card
+    // is populated even if research.completed fired before mount.
+    fetch('/api/research/me')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { brand_id: string | null; research: Record<string, unknown> } | null) => {
+        if (!d?.research || Object.keys(d.research).length === 0) return
+        useResearchStore.getState().hydrateBrand({
+          fetched_at: (d.research.fetched_at as string) ?? '',
+          sources: (d.research.sources as never) ?? [],
+          answer: (d.research.answer as string | null) ?? null,
+          error: (d.research.error as string | null) ?? null,
+          brand_id: d.brand_id ?? undefined,
+        })
+      })
+      .catch(() => {/* non-fatal */})
+  }, [])
+
   const scraped = useOnboardingStore((s) => s.scraped)
   const voice = useOnboardingStore((s) => s.voice)
   const competitors = useOnboardingStore((s) => s.competitors)
@@ -88,6 +111,10 @@ export function StepReading({ onAdvance }: { onAdvance: () => void }) {
             <CompetitorRow competitors={competitors} />
           )}
         </Card>
+      </div>
+
+      <div className="px-10 pb-8">
+        <ResearchCard scope="brand" title="Live web research" max={10} />
       </div>
 
       <div className="px-10 pb-8">

@@ -29,9 +29,26 @@ class BasicsOut(BaseModel):
 def post_basics(
     body: BasicsIn, db: Annotated[Session, Depends(get_db)]
 ) -> BasicsOut:
+    url_str = str(body.url)
+    # Idempotency: reuse an in-progress (not yet onboarded) brand for the same URL
+    existing = (
+        db.query(models.Brand)
+        .filter(
+            models.Brand.url == url_str,
+            models.Brand.onboarded_at.is_(None),
+        )
+        .first()
+    )
+    if existing is not None:
+        bus.emit(
+            Events.ONBOARDING_BASICS_SAVED,
+            {"brand_id": existing.id, "url": existing.url},
+        )
+        return BasicsOut(brand_id=existing.id)
+
     brand = models.Brand(
         name=(body.name or "").strip() or "(unnamed)",
-        url=str(body.url),
+        url=url_str,
         description=(body.description or "").strip() or None,
     )
     db.add(brand)
@@ -178,6 +195,113 @@ def delete_me(db: Annotated[Session, Depends(get_db)]) -> dict:
     return {"ok": True, "deleted": brand_id}
 
 
+@router.get("/status")
+def get_status(db: Annotated[Session, Depends(get_db)]) -> dict:
+    """Return the most recent brand regardless of onboarding completion status.
+
+    Used by the frontend to reconcile the onboarding wizard state after an SSE
+    reconnect or on initial mount of the 'Reading you' panel, so that events
+    which fired before the connection was established are not lost.
+    """
+    brand = (
+        db.query(models.Brand)
+        .order_by(models.Brand.created_at.desc())
+        .first()
+    )
+    if brand is None:
+        return {"brand": None}
+    return {
+        "brand": {
+            "id": brand.id,
+            "name": brand.name,
+            "url": brand.url,
+            "description": brand.description,
+            "logo_url": brand.logo_url,
+            "screenshots": brand.screenshots or [],
+            "theme_color": brand.theme_color,
+            "palette": brand.palette or [],
+            "palette_roles": brand.palette_roles or [],
+            "identity": brand.identity or {},
+            "voice_profile": brand.voice_profile or {},
+            "handles": brand.handles or {},
+            "product_images": brand.product_images or [],
+            "recent_posts": brand.recent_posts or [],
+            "style_profile": brand.style_profile or {},
+            "onboarded_at": brand.onboarded_at.isoformat() if brand.onboarded_at else None,
+            "competitors": [
+                {
+                    "id": c.id,
+                    "name": c.name,
+                    "url": c.url,
+                    "reason": c.reason,
+                    "logo_url": c.logo_url,
+                }
+                for c in brand.competitors
+            ],
+        }
+    }
+
+
+def _connection_summary(brand: models.Brand, db: Session) -> dict:
+    """Real, live connection state for the dashboard's Recipes & Assets page.
+
+    Token-free — never echoes credentials. Counts live records so the UI can
+    say "200 customers · synced 3h ago" instead of inventing numbers.
+    """
+    kanban: list[dict] = []
+    for provider, blob in (brand.kanban_connections or {}).items():
+        if not isinstance(blob, dict):
+            continue
+        kanban.append(
+            {
+                "provider": provider,
+                "selected_boards": list(blob.get("selected_boards") or []),
+                "last_synced_at": blob.get("last_synced_at"),
+            }
+        )
+    kanban_count = (
+        db.query(models.KanbanCard)
+        .filter(models.KanbanCard.brand_id == brand.id)
+        .count()
+        if kanban
+        else 0
+    )
+
+    crm: list[dict] = []
+    for provider, blob in (brand.crm_connections or {}).items():
+        if not isinstance(blob, dict):
+            continue
+        crm.append(
+            {
+                "provider": provider,
+                "last_synced_at": blob.get("last_synced_at"),
+            }
+        )
+    customer_count = (
+        db.query(models.Customer)
+        .filter(models.Customer.brand_id == brand.id)
+        .count()
+    )
+
+    social: list[dict] = []
+    for provider, blob in (brand.social_connections or {}).items():
+        if not isinstance(blob, dict):
+            continue
+        social.append(
+            {
+                "provider": provider,
+                "username": blob.get("username") or blob.get("display_name"),
+                "connected_at": blob.get("connected_at"),
+            }
+        )
+
+    return {
+        "kanban": {"providers": kanban, "card_count": kanban_count},
+        "crm": {"providers": crm, "customer_count": customer_count},
+        "social": {"providers": social},
+    }
+
+
 @router.get("/me")
 def get_me(db: Annotated[Session, Depends(get_db)]) -> dict:
     brand = (
@@ -202,6 +326,7 @@ def get_me(db: Annotated[Session, Depends(get_db)]) -> dict:
             "identity": brand.identity,
             "voice_profile": brand.voice_profile,
             "handles": brand.handles,
+            "connections": _connection_summary(brand, db),
             "competitors": [
                 {
                     "id": c.id,

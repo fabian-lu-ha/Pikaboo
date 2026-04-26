@@ -18,9 +18,24 @@ dist/
 *.db
 *.sqlite
 *.sqlite3
+storage/
 backend/storage/
+backend/backend/
+
+# logs
+*.log
 
 # os / editor
 .DS_Store
 .idea/
 .vscode/
+
+# local agent / tooling state
+.claude/
+.gstack/
+.playwright-mcp/
+
+# local test artifacts
+test_evidence_*/
+test_toast_demo.html
+frontend/public/test_toast_demo.html

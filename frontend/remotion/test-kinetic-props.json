@@ -1,0 +1,65 @@
+{
+  "aspect": "16:9",
+  "brand": {
+    "palette": ["#0f172a", "#1e293b", "#38bdf8", "#fb923c", "#fef3c7"],
+    "palette_roles": [
+      { "hex": "#0f172a", "role": "background" },
+      { "hex": "#fafafa", "role": "text" },
+      { "hex": "#fb923c", "role": "accent" }
+    ],
+    "headline_font": "Inter",
+    "body_font": "Inter",
+    "caption_motion": "slide-up",
+    "caption_weight": 700,
+    "caption_tracking_em": -0.01,
+    "caption_all_caps": false
+  },
+  "brand_name": "Acme",
+  "frames": [
+    {
+      "kind": "design_sequence",
+      "template": "headline_punch",
+      "duration_ms": 3000,
+      "caption_color": "#fff9ef",
+      "params": {
+        "template": "headline_punch",
+        "headline": "Built for builders",
+        "subheadline": "From the studio that ships."
+      }
+    },
+    {
+      "kind": "design_sequence",
+      "template": "word_kinetic",
+      "duration_ms": 3000,
+      "caption_color": "#fff9ef",
+      "params": {
+        "template": "word_kinetic",
+        "words": [
+          { "text": "Run.", "style": "bold", "color": "text", "enter": "slide" },
+          { "text": "Ship.", "style": "italic", "color": "accent", "enter": "rotate" },
+          { "text": "Repeat.", "style": "caps", "color": "text", "enter": "scale" },
+          { "text": "Forever.", "style": "bold", "color": "accent", "enter": "flip" }
+        ]
+      }
+    },
+    {
+      "kind": "design_sequence",
+      "template": "text_scroll",
+      "duration_ms": 4000,
+      "caption_color": "#fff9ef",
+      "params": {
+        "template": "text_scroll",
+        "theme": "full",
+        "lines": [
+          "What we believe",
+          "Speed is a feature",
+          "Quality is the brand",
+          "Built by users for users",
+          "No bloat. No friction.",
+          "Just shipping.",
+          "Every. Single. Day."
+        ]
+      }
+    }
+  ]
+}
