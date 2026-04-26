@@ -33,6 +33,58 @@ class Events:
     LINEAR_PR_MERGED = "linear.pr_merged"
     CHATGPT_CITED = "chatgpt.cited"
 
+    VIDEO_STORYBOARD_SUGGESTED = "video.storyboard_suggested"
+    VIDEO_CAST_PROPOSED = "video.cast_proposed"
+    VIDEO_INGREDIENT_GENERATING = "video.ingredient_generating"
+    VIDEO_INGREDIENT_GENERATED = "video.ingredient_generated"
+    VIDEO_INGREDIENT_REGENERATED = "video.ingredient_regenerated"
+    VIDEO_CAST_BIBLE_LOCKED = "video.cast_bible_locked"
+    VIDEO_FRAME_GENERATING = "video.frame_generating"
+    VIDEO_FRAME_GENERATED = "video.frame_generated"
+    VIDEO_FRAME_STALE = "video.frame_stale"
+    IMAGE_EDIT_STARTED = "image.edit_started"
+    IMAGE_EDITED = "image.edited"
+    IMAGE_EDIT_FAILED = "image.edit_failed"
+    # Per-scene Veo clip generation (the production path; replaces
+    # frame_generating / frame_generated for clip-based renders)
+    VIDEO_SCENE_GENERATING = "video.scene_generating"
+    VIDEO_SCENE_GENERATED = "video.scene_generated"
+    VIDEO_RENDER_STARTED = "video.render_started"
+    VIDEO_RENDERED = "video.rendered"
+    VIDEO_RENDER_FAILED = "video.render_failed"
+
+    KANBAN_CONNECTED = "kanban.connected"
+    KANBAN_SYNC_STARTED = "kanban.sync_started"
+    KANBAN_SYNCED = "kanban.synced"
+    KANBAN_FEATURE_SHIPPED = "kanban.feature_shipped"
+    KANBAN_FEATURE_IN_FLIGHT = "kanban.feature_in_flight"
+    KANBAN_MARKETING_ACTIVE = "kanban.marketing_active"
+
+    AUDIENCE_CRM_CONNECTED = "audience.crm_connected"
+    AUDIENCE_IMPORT_STARTED = "audience.import_started"
+    AUDIENCE_CUSTOMERS_IMPORTED = "audience.customers_imported"
+    AUDIENCE_SEGMENTS_PROPOSING = "audience.segments_proposing"
+    AUDIENCE_SEGMENTS_PROPOSED = "audience.segments_proposed"
+    AUDIENCE_SEGMENT_SAVED = "audience.segment_saved"
+    AUDIENCE_PII_REDACTED = "audience.pii_redacted"
+    AUDIENCE_PERSONALIZING = "audience.personalizing"
+    AUDIENCE_PERSONALIZED = "audience.personalized"
+    AUDIENCE_EMAIL_DISPATCHED = "audience.email_dispatched"
+    AUDIENCE_SHOP_EVENT_TRIGGERED = "audience.shop_event_triggered"
+    AUDIENCE_SHOP_AUTO_PERSONALIZED = "audience.shop_auto_personalized"
+
+    ONBOARDING_COMPETITOR_PRODUCTS_EXTRACTING = (
+        "onboarding.competitor_products_extracting"
+    )
+    ONBOARDING_COMPETITOR_PRODUCTS_EXTRACTED = (
+        "onboarding.competitor_products_extracted"
+    )
+
+    PEEC_MCP_CONNECTED = "peec_mcp.connected"
+    PEEC_MCP_DISCONNECTED = "peec_mcp.disconnected"
+    PEEC_MCP_TOOL_CALLED = "peec_mcp.tool_called"
+    PEEC_MCP_FAILED = "peec_mcp.failed"
+
 
 KNOWN_EVENTS: tuple[str, ...] = tuple(
     v

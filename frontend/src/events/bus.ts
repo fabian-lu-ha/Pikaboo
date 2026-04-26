@@ -1,4 +1,5 @@
 import mitt from 'mitt'
+import type { ProposedSegment, Segment } from '../lib/audience'
 
 export type VoiceProfile = {
   tone: string
@@ -165,6 +166,68 @@ export type AgentDraft = {
   body: string
 }
 
+export type VideoAspect = '9:16' | '16:9' | '1:1'
+
+export type CastKind = 'character' | 'setting' | 'prop' | 'product'
+
+export type FocalZone =
+  | 'tl'
+  | 'tc'
+  | 'tr'
+  | 'ml'
+  | 'mc'
+  | 'mr'
+  | 'bl'
+  | 'bc'
+  | 'br'
+
+// Veo model tier — fast (default, ~30-45s/clip) vs. quality (~60-90s/clip,
+// hero render). Selected per-scene; the backend resolves to the configured
+// veo_fast_model / veo_quality_model identifier.
+export type VeoQuality = 'fast' | 'quality'
+
+// Pure-typography bookends rendered by Remotion (no Veo clip).
+export type StoryboardTitleCard = {
+  text: string
+}
+
+export type StoryboardEndCard = {
+  headline: string
+  cta: string
+}
+
+export type CastBinding = {
+  type: 'brand_asset' | 'needs_generation'
+  asset_index?: number | null
+}
+
+export type CastMember = {
+  id: string
+  kind: CastKind
+  role: string
+  description: string
+  neutral_pose_hint?: string | null
+  binding: CastBinding
+  canonical_url: string | null
+  narrative_purpose?: string
+}
+
+export type StoryboardNarrative = {
+  premise: string
+  arc: string
+  tone: string
+}
+
+export type StoryboardFrame = {
+  id: string
+  prompt: string
+  caption: string
+  duration_ms: number
+  cast_refs: string[]
+  focal_zone: FocalZone
+  motion?: string
+}
+
 export type AgentEvents = {
   'chat.submitted': { text: string }
   'agent.started': {
@@ -212,6 +275,80 @@ export type AgentEvents = {
   }
   'competitor.surged': { competitor: string; prompt: string; delta: number }
   'linear.pr_merged': { pr: string; ship_ready: boolean }
+
+  'video.storyboard_suggested': {
+    storyboard_id: string
+    aspect: VideoAspect
+    cast: CastMember[]
+    frames: StoryboardFrame[]
+    narrative?: StoryboardNarrative
+    title_card?: StoryboardTitleCard | null
+    end_card?: StoryboardEndCard | null
+  }
+  'video.cast_proposed': {
+    storyboard_id: string
+    cast: CastMember[]
+  }
+  'video.ingredient_generating': {
+    storyboard_id: string
+    cast_id: string
+    kind: CastKind
+    regenerate?: boolean
+  }
+  'video.ingredient_generated': {
+    storyboard_id: string
+    cast_id: string
+    canonical_url: string
+    kind: CastKind
+    from_brand_asset?: boolean
+  }
+  'video.ingredient_regenerated': {
+    storyboard_id: string
+    cast_id: string
+    canonical_url: string
+    previous_url: string | null
+    kind: CastKind
+  }
+  'video.cast_bible_locked': { storyboard_id: string }
+  'video.frame_generating': {
+    storyboard_id: string | null
+    frame_id: string | null
+    cast_refs: string[]
+  }
+  'video.frame_generated': {
+    storyboard_id: string | null
+    frame_id: string | null
+    image_url: string
+    aspect: VideoAspect
+    prompt_preview: string
+    cast_refs: string[]
+  }
+  'video.frame_stale': {
+    storyboard_id: string
+    frame_id: string
+    cast_id: string
+  }
+  'video.scene_generating': {
+    storyboard_id: string
+    frame_id: string
+    cast_refs: string[]
+    duration_ms: number
+    quality?: VeoQuality
+    from_keyframe?: boolean
+  }
+  'video.scene_generated': {
+    storyboard_id: string
+    frame_id: string
+    clip_url: string
+    aspect: VideoAspect
+    cast_refs: string[]
+    duration_ms: number
+    quality?: VeoQuality
+    from_keyframe?: boolean
+  }
+  'video.render_started': Record<string, never>
+  'video.rendered': { video_url: string; duration_ms: number }
+  'video.render_failed': { error: string }
 
   'onboarding.basics_saved': { brand_id: string; url: string }
   'onboarding.scraping': { brand_id: string; url: string }
@@ -266,6 +403,70 @@ export type AgentEvents = {
   }
   'onboarding.failed': { brand_id: string; error: string }
   'onboarding.completed': { brand_id: string }
+
+  'audience.crm_connected': { brand_id: string; provider: string }
+  'audience.import_started': { brand_id: string; provider: string }
+  'audience.customers_imported': {
+    brand_id: string
+    provider: string
+    customer_count: number
+    product_count: number
+    event_count: number
+  }
+  'audience.segments_proposing': { brand_id: string }
+  'audience.segments_proposed': {
+    brand_id: string
+    segments: ProposedSegment[]
+  }
+  'audience.segment_saved': { brand_id: string; segment: Segment }
+  'audience.pii_redacted': {
+    brand_id: string
+    entity_count: number
+    entity_types: string[]
+  }
+  'audience.personalizing': {
+    brand_id: string
+    target_kind: 'customer' | 'segment'
+    target_id: string
+  }
+  'audience.personalized': {
+    brand_id: string
+    target_kind: 'customer' | 'segment'
+    target_id: string
+    subject_preview: string
+    recommended_product_ids: string[]
+  }
+  'audience.email_dispatched': {
+    brand_id: string
+    target_kind: 'customer' | 'segment'
+    target_id: string
+    recipient_count: number
+  }
+  'audience.shop_event_triggered': {
+    brand_id: string
+    customer_id: string
+    kind: 'cart_abandoned' | 'subscription_lapsed'
+    event_id: string
+    payload: Record<string, unknown>
+  }
+  'audience.shop_auto_personalized': {
+    brand_id: string
+    customer_id: string
+    trigger_kind: 'cart_abandoned' | 'subscription_lapsed'
+    subject_preview: string
+    recommended_product_ids: string[]
+  }
+
+  'onboarding.competitor_products_extracting': {
+    brand_id: string
+    competitor_id: string
+    url: string
+  }
+  'onboarding.competitor_products_extracted': {
+    brand_id: string
+    competitor_id: string
+    product_count: number
+  }
 }
 
 export const bus = mitt<AgentEvents>()

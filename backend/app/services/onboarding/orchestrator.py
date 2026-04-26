@@ -99,6 +99,48 @@ async def enrich_competitor(brand_id: str, comp_id: str, url: str) -> str | None
     )
 
 
+async def _extract_and_persist_competitor_products(
+    brand_id: str, comp_id: str, url: str
+) -> int:
+    """Pull a small product catalog from the competitor URL and stash it
+    on ``Competitor.pattern_library['products']``. Fail-soft: returns 0 on
+    any extractor error so onboarding never gets stuck on a brittle scrape."""
+    if not url:
+        return 0
+    from app.services.enrichment.competitor_products import (
+        extract as _extract_products,
+    )
+
+    bus.emit(
+        Events.ONBOARDING_COMPETITOR_PRODUCTS_EXTRACTING,
+        {"brand_id": brand_id, "competitor_id": comp_id, "url": url},
+    )
+    try:
+        products = await _extract_products(url)
+    except Exception:
+        log.exception("competitor product extract crashed (treating as 0)")
+        products = []
+
+    with SessionLocal() as cdb:
+        row = cdb.get(models.Competitor, comp_id)
+        if row is not None:
+            pattern_library = dict(row.pattern_library or {})
+            pattern_library["products"] = products
+            row.pattern_library = pattern_library
+            cdb.add(row)
+            cdb.commit()
+
+    bus.emit(
+        Events.ONBOARDING_COMPETITOR_PRODUCTS_EXTRACTED,
+        {
+            "brand_id": brand_id,
+            "competitor_id": comp_id,
+            "product_count": len(products),
+        },
+    )
+    return len(products)
+
+
 async def _run_post_enrichment(
     brand_id: str,
     handles: dict[str, str],
@@ -310,6 +352,11 @@ async def run(brand_id: str) -> None:
                         "competitor_id": comp["id"],
                         "logo_url": logo,
                     },
+                )
+                # Pull product catalog asynchronously — fail-soft, doesn't
+                # block subsequent onboarding events.
+                await _extract_and_persist_competitor_products(
+                    brand_id, comp["id"], comp["url"]
                 )
 
             await asyncio.gather(*(enrich_and_persist(c) for c in saved))
